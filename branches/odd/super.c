@@ -52,7 +52,7 @@ void count_gen(int level) {
 
 	max_s = s;
 	max_defects1 = ((n*(n+1)/2 - k - 3) - 3*max_s)/2;
-	max_defects = max_defects > max_defects1 ? max_defects1 : max_defects;
+	//max_defects = max_defects > max_defects1 ? max_defects1 : max_defects;
 
 	if (strcmp(filename, "") == 0) {
 		printf(" %d %d %d)", s, max_defects, max_defects1);
