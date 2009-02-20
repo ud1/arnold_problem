@@ -47,7 +47,7 @@ void find_parallel_config (int k, int level) {
 	}
 	if (s < 0)
 		s = -s;
-	if (s < max_s || !full && s == max_s)
+	if (s < max_s || !full && s == max_s[k])
 		return;
 
 	max_s[k] = s;
