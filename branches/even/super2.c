@@ -30,6 +30,8 @@ int max_defects;
 // User input
 char filename[80] = "";
 int max_defects_default = 0;
+int full = 0;
+int show_stat = 0;
 
 void find_parallel_config (int k, int level) {
 	int s, i, max_defects1;
@@ -45,7 +47,7 @@ void find_parallel_config (int k, int level) {
 	}
 	if (s < 0)
 		s = -s;
-	if (s <= max_s[k])
+	if (s < max_s || !full && s == max_s)
 		return;
 
 	max_s[k] = s;
@@ -59,8 +61,9 @@ void find_parallel_config (int k, int level) {
 		}
 
 		printf("\n");
-		for (i = 0; i < n/2 + 1; i++ )
-			printf("A(%d, %d) = %d;\n", n, i, max_s[i]);
+		if (show_stat)
+			for (i = 0; i < n/2 + 1; i++ )
+				printf("A(%d, %d) = %d;\n", n, i, max_s[i]);
 
 		fflush(NULL);
 		fflush(NULL);
@@ -76,8 +79,9 @@ void find_parallel_config (int k, int level) {
 		}
 
 		fprintf(f, "\n");
-		for (i = 0; i < n/2 + 1; i++ )
-			fprintf(f, "A(%d, %d) = %d;\n", n, i, max_s[i]);
+		if (show_stat)
+			for (i = 0; i < n/2 + 1; i++ )
+				fprintf(f, "A(%d, %d) = %d;\n", n, i, max_s[i]);
 		fclose(f);
 	}
 }
@@ -170,18 +174,25 @@ int main(int argc, char **argv) {
 	int i;
 	char s[80];
 
+	if (!argc) {
+		printf("Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat]\n  -n\n     line count;\n  -max-def\n     the number of allowed defects;\n  -full\n     output all found generator sets;\n  -stat\n     show stat after every generator set;\n  -o\n     output file.\n", argv[0]);
+		return 0;
+	}
+
 	for (i = 1; i < argc; i++) {
 		strcpy(s, argv[i]);
 		if (0 == strcmp("-n", s))
 			sscanf(argv[++i], "%d", &n);
-		/*else if (0 == strcmp("-k", s))
-			sscanf(argv[++i], "%d", &k);*/
 		else if (0 == strcmp("-max-def", s))
 			sscanf(argv[++i], "%d", &max_defects_default);
 		else if (0 == strcmp("-o", s))
 			strcpy(filename, argv[++i]);
+		else if (0 == strcmp("-full", s))
+			full = 1;
+		else if (0 == strcmp("-stat", s))
+			show_stat = 1;
 		else {
-			printf("Invalid parameter: \"%s\".\nUsage: %s -n N [-k K] [-max-def D] [-o filename]\n  -n\n     line count;\n//  -k\n     parrallel pairs count;\n  -max-def\n     the number of allowed defects;\n  -o\n     output file.\n", s, argv[0]);
+			printf("Invalid parameter: \"%s\".\nUsage: %s -n N [-max-def D] [-o filename] [-full] [-stat]\n  -n\n     line count;\n  -max-def\n     the number of allowed defects;\n  -full\n     output all found generator sets;\n  -stat\n     show stat after every generator set;\n  -o\n     output file.\n", s, argv[0]);
 			return 0;
 		}
 	}
@@ -202,7 +213,7 @@ int main(int argc, char **argv) {
 	for (i = 3; i < n1; i++ ) {
 		triplets[0][i] = triplets[1][i] = triplets[2][i] = i;
 	}
-	
+
 	triplets[0][0] = 1;
 	triplets[0][1] = 2;
 	triplets[0][2] = -1;
@@ -212,13 +223,13 @@ int main(int argc, char **argv) {
 	triplets[2][0] = -1;
 	triplets[2][1] = 2;
 	triplets[2][2] = 1;
-	
+
 	stat[0].rearrangement = 0;
 	stat[0].generator = 0;
 	stat[0].defects = 0;
 
 	new1(0);
-	
+
 	printf("---------->>>Process terminated.\n");
 	for (i = n/2 + 1; i--; )
 		printf("A(%d, %d) = %d;\n", n, i, max_s[i]);
