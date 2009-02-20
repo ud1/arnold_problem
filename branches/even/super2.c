@@ -47,7 +47,7 @@ void find_parallel_config (int k, int level) {
 	}
 	if (s < 0)
 		s = -s;
-	if (s < max_s || !full && s == max_s[k])
+	if (s < max_s[k] || !full && s == max_s[k])
 		return;
 
 	max_s[k] = s;
@@ -174,7 +174,7 @@ int main(int argc, char **argv) {
 	int i;
 	char s[80];
 
-	if (!argc) {
+	if (argc < 2) {
 		printf("Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat]\n  -n\n     line count;\n  -max-def\n     the number of allowed defects;\n  -full\n     output all found generator sets;\n  -stat\n     show stat after every generator set;\n  -o\n     output file.\n", argv[0]);
 		return 0;
 	}
@@ -196,7 +196,6 @@ int main(int argc, char **argv) {
 			return 0;
 		}
 	}
-	//sscanf(argv[1], "%d/%d", &n, &k);
 
 	b_free = (max_defects = n_step = n*(n-1) / 2) - 1;
 
