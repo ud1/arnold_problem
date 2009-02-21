@@ -35,7 +35,6 @@ int max_s = 0, max_defects;
 char filename[80] = "";
 int max_defects_default = 0;
 int full = 0;
-//int show_stat = 0;
 
 void count_gen(int level) {
 	int s, i, max_defects1;
@@ -81,7 +80,7 @@ void count_gen(int level) {
 	return;
 }
 
-void set (int curr_generator, int t) {
+void inline set (int curr_generator, int t) {
 	int i;
 
 	b_free += -2*t+1;
@@ -90,11 +89,11 @@ void set (int curr_generator, int t) {
 	a[curr_generator + 1] = i;
 }
 
-void new1 (int level) {
+// Calculations for defectless configurations
+void calc (int level) {
 	int curr_generator, direct, i;
 
 	max_s = 0;
-	max_defects = max_defects_default;
 
 	stat[level].rearr_index = -1;
 	for (i = n + 1; i--; ) {
@@ -114,19 +113,17 @@ void new1 (int level) {
 				count_gen(level);
 				continue;
 			}
-			stat[level + 1].defects = stat[level].defects;
+			// Optimization
 			if (!(curr_generator % 2)) { // even, white
-				if (d[curr_generator + 1] < 3) // without defects, disallow white squares
+				// without defects, disallow white triangles and squares
+				if (d[curr_generator + 1] < 3)
 					continue;
-				if (d[curr_generator] == 1) {
-					stat[level + 1].defects++;
-				}
-				if (d[curr_generator + 2] == 1) {
-					stat[level + 1].defects++;
-				}
-				if (stat[level + 1].defects > max_defects) {
+
+				// disallow black squares
+				if (d[curr_generator] == 1)
 					continue;
-				}
+				if (d[curr_generator + 2] == 1)
+					continue;
 			}
 			stat[level+1].stack = d[curr_generator + 1];
 			d[curr_generator + 1] = 0;
@@ -135,11 +132,12 @@ void new1 (int level) {
 			set(curr_generator, 1);
 			level++;
 //			stat[level].rearrangement = direct > 0 ? 1 : 2;
+			//Euristics
 			if (direct > 0) {
 				if (curr_generator % 2)
-				stat[level].rearrangement = 1;
+					stat[level].rearrangement = 1;
 				else
-				stat[level].rearrangement = 0;
+					stat[level].rearrangement = 0;
 			}
 			else
 				stat[level].rearrangement = 2;
@@ -158,7 +156,7 @@ void new1 (int level) {
 	}
 }
 
-void new1_def (int level) {
+void calc_def (int level) {
 	int curr_generator, direct, i;
 
 	max_s = 0;
@@ -241,8 +239,6 @@ int main(int argc, char **argv) {
 			strcpy(filename, argv[++i]);
 		else if (0 == strcmp("-full", s))
 			full = 1;
-//		else if (0 == strcmp("-stat", s))
-//		show_stat = 1;
 		else {
 			printf("Invalid parameter: \"%s\".\nUsage: %s -n N [-k K] [-max-def D] [-o filename]\n  -n\n	 line count;\n  -k\n	 parrallel pairs count;\n  -max-def\n	 the number of allowed defects;\n  -o\n	 output file.\n", s, argv[0]);
 			return 0;
@@ -299,18 +295,18 @@ int main(int argc, char **argv) {
 		for (k1 = k; k1--; )
 			set(2*k1, 1);
 		if (max_defects_default == 0)
-			new1(0);
+			calc(0);
 		else
-			new1_def(0);
+			calc_def(0);
 		}
 	else {
 		if (n % 2) {
 			for (k=0; k<=n/2; k++) {
 				printf("---------->>>k=%d\n",k);
 				if (max_defects_default == 0)
-					new1(0);
+					calc(0);
 				else
-					new1_def(0);
+					calc_def(0);
 				set(2*k, 1);
 			}
 		}
@@ -318,14 +314,17 @@ int main(int argc, char **argv) {
 			for (k=0; k<n/2; k++)
 				set(2*k, 1);
 			printf("---------->>>k=%d\n",k);
-			new1(0);
+			if (max_defects_default == 0)
+				calc(0);
+			else
+				calc_def(0);
 			for (; k--; ) {
 				printf("---------->>>k=%d\n",k);
 				set(2*k, 0);
 				if (max_defects_default == 0)
-					new1(0);
+					calc(0);
 				else
-					new1_def(0);
+					calc_def(0);
 			}
 		}
 	}
