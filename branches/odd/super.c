@@ -27,7 +27,7 @@ Stat stat[n_step1 + 1];
 int a[n1], d[n1 + 1];
 
 int b_free;
-int max_s = 0, max_defects;
+int max_s = 0, max_defects = 0;
 
 // User input
 char filename[80] = "";
@@ -91,7 +91,6 @@ void calc (int level) {
 	int curr_generator, direct, i;
 
 	max_s = 0;
-	max_defects = 0;
 
 	stat[level].rearr_index = -1;
 	for (i = n + 1; i--; ) {
@@ -246,7 +245,7 @@ int main(int argc, char **argv) {
 	}
 	//sscanf(argv[1], "%d/%d", &n, &k);
 
-	b_free = (max_defects = n_step = n*(n-1) / 2) - 1;
+	b_free = (n_step = n*(n-1) / 2) - 1;
 
 	for (i = 0; i < n; i++) {
 		a[i] = i;
