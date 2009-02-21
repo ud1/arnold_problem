@@ -29,8 +29,6 @@ int a[n1], d[n1 + 1];
 int b_free;
 int max_s = 0, max_defects;
 
-//int def_gen[n_step1];
-
 // User input
 char filename[80] = "";
 int max_defects_default = 0;
@@ -94,6 +92,7 @@ void calc (int level) {
 	int curr_generator, direct, i;
 
 	max_s = 0;
+	max_defects = 0;
 
 	stat[level].rearr_index = -1;
 	for (i = n + 1; i--; ) {
@@ -115,14 +114,12 @@ void calc (int level) {
 			}
 			// Optimization
 			if (!(curr_generator % 2)) { // even, white
-				// without defects, disallow white triangles and squares
-				if (d[curr_generator + 1] < 3)
+				// disallow black squares
+				if (d[curr_generator] == 1 || d[curr_generator + 2] == 1)
 					continue;
 
-				// disallow black squares
-				if (d[curr_generator] == 1)
-					continue;
-				if (d[curr_generator + 2] == 1)
+				// disallow white triangles and squares
+				if (d[curr_generator + 1] < 3)
 					continue;
 			}
 			stat[level+1].stack = d[curr_generator + 1];
@@ -182,8 +179,7 @@ void calc_def (int level) {
 			}
 			stat[level + 1].defects = stat[level].defects;
 			if (!(curr_generator % 2)) { // even, white
-				if (d[curr_generator + 1] == 1) // for defects, allow white squares
-					continue;
+				// disallow too many black squares
 				if (d[curr_generator] == 1) {
 					stat[level + 1].defects++;
 				}
@@ -193,6 +189,10 @@ void calc_def (int level) {
 				if (stat[level + 1].defects > max_defects) {
 					continue;
 				}
+
+				// for defects, disallow white triangles and allow white squares
+				if (d[curr_generator + 1] == 1)
+					continue;
 			}
 			stat[level+1].stack = d[curr_generator + 1];
 			d[curr_generator + 1] = 0;
