@@ -11,7 +11,7 @@
 
 #define rearrangement_count 3
 
-int n, k=-1, n_step/*, n_def_gen*/;
+int n, k=-1, n_step;
 
 int triplets_def[rearrangement_count][plurality_def];
 int triplets[rearrangement_count][plurality]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
@@ -49,7 +49,6 @@ void count_gen(int level) {
 
 	max_s = s;
 	max_defects1 = ((n*(n+1)/2 - k - 3) - 3*max_s)/2;
-	//max_defects = max_defects > max_defects1 ? max_defects1 : max_defects;
 
 	if (strcmp(filename, "") == 0) {
 		printf(" %d %d %d)", s, max_defects, max_defects1);
@@ -115,10 +114,12 @@ void calc (int level) {
 			// Optimization
 			if (!(curr_generator % 2)) { // even, white
 				// disallow black squares
-				if (d[curr_generator] == 1 || d[curr_generator + 2] == 1)
+				if (d[curr_generator] == 1)
+					continue;
+				if (d[curr_generator + 2] == 1)
 					continue;
 
-				// disallow white triangles and squares
+				// without defects, disallow white triangles and squares
 				if (d[curr_generator + 1] < 3)
 					continue;
 			}
@@ -179,7 +180,6 @@ void calc_def (int level) {
 			}
 			stat[level + 1].defects = stat[level].defects;
 			if (!(curr_generator % 2)) { // even, white
-				// disallow too many black squares
 				if (d[curr_generator] == 1) {
 					stat[level + 1].defects++;
 				}
@@ -248,10 +248,6 @@ int main(int argc, char **argv) {
 
 	b_free = (max_defects = n_step = n*(n-1) / 2) - 1;
 
-/*	n_def_gen = argc - 2;
-	for (i = 0; i < n_def_gen; i++)
-		sscanf(argv[i + 2], "%d", def_gen + i);
-*/
 	for (i = 0; i < n; i++) {
 		a[i] = i;
 	}
