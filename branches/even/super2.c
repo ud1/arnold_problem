@@ -7,7 +7,7 @@
 #define plurality 3
 #define rearrangement_count 3
 
-int n, n_step, n_def_gen;
+int n, n_step;
 
 int triplets[rearrangement_count][n1]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
 
@@ -19,7 +19,6 @@ typedef struct {
 
 Stat stat[n_step1 + 1];
 
-int def_gen[n_step1];
 int a[n1], d[n1 + 1];
 
 int max_s[n1/2 + 1];
@@ -52,7 +51,6 @@ void find_parallel_config (int k, int level) {
 
 	max_s[k] = s;
 	max_defects1 = ((n*(n+1)/2 - k - 3) - 3*max_s[k])/2;
-	//max_defects = max_defects > max_defects1 ? max_defects1 : max_defects;
 
 	if (strcmp(filename, "") == 0) {
 		printf("A(%d, %d) = %d; %d %d)", n, k, s, max_defects, max_defects1);
@@ -72,7 +70,7 @@ void find_parallel_config (int k, int level) {
 	}
 	else {
 		f = fopen(filename, "a");
-		
+
 		fprintf(f, "A(%d, %d) = %d; %d %d)", n, k, s, max_defects, max_defects1);
 		for (i=1; i <= level+1; i++) {
 			fprintf(f, " %d", stat[i].generator);
@@ -199,14 +197,10 @@ int main(int argc, char **argv) {
 
 	b_free = (max_defects = n_step = n*(n-1) / 2) - 1;
 
-/*	n_def_gen = argc - 2;
-	for (i = 0; i < n_def_gen; i++)
-		sscanf(argv[i + 2], "%d", def_gen + i);
-*/
 	for (i = 0; i < n; i++) {
 		a[i] = i;
 	}
-	
+
 	//{{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
 
 	for (i = 3; i < n1; i++ ) {
