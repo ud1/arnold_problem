@@ -1,0 +1,14 @@
+5-0 - full
+7-0 - full
+9-0 - full
+10-2 - full
+11-0 - full
+12-4 - full
+13-0 - full
+14-4 - full
+14-6 - full
+15-0 - full
+16-4 - full
+17-0 - full
+18-4 - max-def 0
+18-4 - full
