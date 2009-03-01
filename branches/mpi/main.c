@@ -48,8 +48,8 @@ typedef struct {
 	int level;
 	int min_level;
 	int status;
-	int rearrangement[n1];
-	int rearr_index[n1];
+	int rearrangement[n_step1];
+	int rearr_index[n_step1];
 } Message;
 
 // Message stack
