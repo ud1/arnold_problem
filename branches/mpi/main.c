@@ -266,10 +266,13 @@ void run(int level, int min_level) {
 				message.min_level = min_level;
 				min_level = i;
 				message.status = FORKED;
-				for (i = 0; i < min_level; ++i) {
+				printf("%s message.level = %d\n", NODE, message.level);
+				for (i = 0; i < message.level; ++i) {
 					message.rearr_index[i] = stats[i].rearr_index;
 					message.rearrangement[i] = stats[i].rearrangement;
+					printf ("%d[%d] ", stats[i].rearrangement, stats[i].rearr_index);
 				}
+				printf("\n");
 				MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
 
 				for (i=0; i<=n_step1; ++i) {
@@ -292,7 +295,7 @@ void run(int level, int min_level) {
 void do_dispatcher(int numprocs) {
 	Message message, *msg;
 	MPI_Status status;
-	int worker;
+	int worker, i;
 
 	printf("%s We have %d processors\n", NODE, numprocs);
 
@@ -314,8 +317,12 @@ void do_dispatcher(int numprocs) {
 	// Main loop
 	for (;;) {
 		printf("%s Waiting for a message\n", NODE);
+		memset((void *)&message, 0, sizeof(Message));
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, MPI_ANY_SOURCE, TAG, MPI_COMM_WORLD, &status);
-		printf("%s Have message\n", NODE);
+		printf("%s Have message, level = %d\n", NODE, message.level);
+		for (i=0; i < message.level; ++i)
+			printf("%d(%d) ", message.rearrangement[i], message.rearr_index[i]);
+		printf("\n");
 		switch (message.status) {
 			case FORKED:
 				worker = get_worker(FINISHED);
@@ -323,7 +330,7 @@ void do_dispatcher(int numprocs) {
 					set_wrk_state(worker, BUSY);
 					message.status = BUSY;
 					printf("%s Sending peace of work to node %d\n", NODE, worker);
-					MPI_Send((void *)msg, sizeof(Message)/sizeof(int), MPI_INT, worker, TAG, MPI_COMM_WORLD);
+					MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, worker, TAG, MPI_COMM_WORLD);
 				} else {
 					printf("%s Push to stack\n", NODE);
 					msg = (Message *) malloc(sizeof(Message));
@@ -402,8 +409,10 @@ void do_worker(int id) {
 		for (i = 0; i < n; i++) {
 			a[i] = i;
 		}
-		
 		run(message.level, message.min_level);
+		//stats[0].rearrangement = 0;
+		//stats[0].rearr_index = -1;
+		//run(0, 0);
 
 		message.status = FINISHED;
 		printf("%s Finished\n", NODE);
