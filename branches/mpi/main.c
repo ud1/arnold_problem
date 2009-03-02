@@ -3,6 +3,8 @@
 #include <string.h>
 #include <signal.h>
 
+#define max(a,b) ((a) > (b) ? (a) : (b))
+
 #define n1 41
 #define n_step1 (n1*(n1-1) / 2)
 
@@ -328,16 +330,16 @@ void do_dispatcher(int numprocs) {
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, MPI_ANY_SOURCE, TAG, MPI_COMM_WORLD, &status);
 
 		for (i = 0; i < n/2 + 1; i++ )
-			message.max_s[i] = max_s[i] = max(message.max_s[i], max_s);
+			message.max_s[i] = max_s[i] = max(message.max_s[i], max_s[i]);
 
 		switch (message.status) {
 			case FORKED:
-				printf("%s Have message, level = %d\n", NODE_NAME, message.level);
+				printf("%s Have a message, level = %d\n", NODE_NAME, message.level);
 				worker = get_worker(FINISHED);
 				if (worker != -1) {
 					set_wrk_state(worker, BUSY);
 					message.status = BUSY;
-					printf("%s Sending peace of work to NODE_NAME %d\n", NODE_NAME, worker);
+					printf("%s Sending a peace of work to the node %d\n", NODE_NAME, worker);
 					MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, worker, TAG, MPI_COMM_WORLD);
 				}
 				else {
@@ -351,9 +353,9 @@ void do_dispatcher(int numprocs) {
 				}
 				break;
 			case FINISHED:
-				printf("%s Have finished message from %d\n", NODE_NAME, status.MPI_SOURCE);
+				printf("%s Have 'finished' message from %d\n", NODE_NAME, status.MPI_SOURCE);
 				if (msg = pop_msg()) {
-					printf("%s Sending peace of work to NODE_NAME %d, pop from stack\n", NODE_NAME, status.MPI_SOURCE);
+					printf("%s Sending a peace of work to the node %d, pop from stack\n", NODE_NAME, status.MPI_SOURCE);
 					MPI_Send((void *)msg, sizeof(Message)/sizeof(int), MPI_INT, status.MPI_SOURCE, TAG, MPI_COMM_WORLD);
 					free(msg);
 				}
@@ -402,15 +404,15 @@ void do_worker(int id) {
 
 	for(;;) {
 		// receive from dispatcher:
-		printf("%s Waiting for a message from dispatcher\n", NODE_NAME);
+		printf("%s Waiting for a message from the dispatcher\n", NODE_NAME);
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD, &status);
 
 		if (message.status == QUIT) {
-			printf("%s Received quit message\n", NODE_NAME);
+			printf("%s Received 'quit' message\n", NODE_NAME);
 			break;
 		}
 
-		printf("%s Received message from dispatcher\n", NODE_NAME);
+		printf("%s Received a message from the dispatcher\n", NODE_NAME);
 
 		for (i = 0; i < n/2 + 1; i++)
 			max_s[i] = message.max_s[i];
