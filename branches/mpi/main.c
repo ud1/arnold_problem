@@ -63,9 +63,11 @@ void msg_init() {
 }
 
 void push_msg_back(Message *msg) {
-	if (++msg_count < msg_reserve)
+	printf("Dispatcher: Stack size is %d\n", msg_count);
+	if (++msg_count > msg_reserve)
 		messages = (Message**) realloc(messages, (msg_reserve*=2)*sizeof(Message*));
 	messages[msg_count-1] = msg;
+	printf("Dispatcher: Stack size is %d\n", msg_count);
 }
 
 Message *pop_msg() {
@@ -102,7 +104,9 @@ int set_wrk_state(int i, int state) {
 }
 
 void tmr (int s) {
-	alarm(TQ);
+//	if (!worker_is_busy)
+//	    return;
+//	alarm(TQ);
 	was_alarm = 1;
 }
 
@@ -181,13 +185,16 @@ void run(int level, int min_level) {
 	}
 
 	// Initializing
-	for (i=0; i<=n_step1; ++i) {
+	for (i = 0; i <= n_step; ++i) {
 		stats[i].processed = 0;
 	}
 
 	for (i=0; i<level; ++i) {
-		stats[i+1].generator = curr_generator = stats[i].generator + triplets[stats[i].rearrangement][stats[i].rearr_index];
+		stats[i + 1].generator = curr_generator = stats[i].generator + triplets[stats[i].rearrangement][stats[i].rearr_index];
+		printf("{%d %d}", i+1, curr_generator);
+		printf("\n");
 		stats[i + 1].defects = stats[i].defects;
+		stats[i + 1].processed++;
 		if (!(curr_generator % 2)/* && (b_free*2 > n)*/) { // even, white
 			if (d[curr_generator] == 1) {
 				stats[i + 1].defects++;
@@ -195,13 +202,16 @@ void run(int level, int min_level) {
 			if (d[curr_generator + 2] == 1) {
 				stats[i + 1].defects++;
 			}
-			stats[i+1].stack = d[curr_generator + 1];
-			d[curr_generator + 1] = 0;
-			d[curr_generator]++;
-			d[curr_generator + 2]++;
-			set(curr_generator, 1);
 		}
+		stats[i+1].stack = d[curr_generator + 1];
+		d[curr_generator + 1] = 0;
+		d[curr_generator]++;
+		d[curr_generator + 2]++;
+		set(curr_generator, 1);
+		
 	}
+	
+	was_alarm = 0;
 
 	// Run
 	while (1) {
@@ -258,24 +268,29 @@ void run(int level, int min_level) {
 			if (was_alarm) {
 				printf("%s Alarm\n", NODE);
 				was_alarm = 0;
-				for (i = min_level; i<n_step1; ++i) {
+				alarm(TQ);
+				for (i = min_level; i < n_step; ++i) {\
+					printf("<%d %d>", i, stats[i + 1].processed);
 					if (stats[i+1].processed > 1)
 						break;
 				}
+				printf("\n");
 				message.level = i-1;
 				message.min_level = min_level;
 				min_level = i;
 				message.status = FORKED;
 				printf("%s message.level = %d\n", NODE, message.level);
-				for (i = 0; i < message.level; ++i) {
+				for (i = 0; i <= message.level; ++i) {
 					message.rearr_index[i] = stats[i].rearr_index;
 					message.rearrangement[i] = stats[i].rearrangement;
 					printf ("%d[%d] ", stats[i].rearrangement, stats[i].rearr_index);
 				}
+				for (i = 0; i < message.level; ++i)
+				    printf("{%d %d}", i+1, stats[i+1].generator);
 				printf("\n");
 				MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
 
-				for (i=0; i<=n_step1; ++i) {
+				for (i = 0; i <= n_step; ++i) {
 					stats[i].processed = 1;
 				}
 			}
@@ -319,12 +334,13 @@ void do_dispatcher(int numprocs) {
 		printf("%s Waiting for a message\n", NODE);
 		memset((void *)&message, 0, sizeof(Message));
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, MPI_ANY_SOURCE, TAG, MPI_COMM_WORLD, &status);
-		printf("%s Have message, level = %d\n", NODE, message.level);
-		for (i=0; i < message.level; ++i)
+		
+		for (i=0; i <= message.level; ++i)
 			printf("%d(%d) ", message.rearrangement[i], message.rearr_index[i]);
 		printf("\n");
 		switch (message.status) {
 			case FORKED:
+				printf("%s Have message, level = %d\n", NODE, message.level);
 				worker = get_worker(FINISHED);
 				if (worker != -1) {
 					set_wrk_state(worker, BUSY);
@@ -334,11 +350,15 @@ void do_dispatcher(int numprocs) {
 				} else {
 					printf("%s Push to stack\n", NODE);
 					msg = (Message *) malloc(sizeof(Message));
+					if (msg == NULL) {
+					    printf ("Panic! Not enough memory!");
+					}
 					memcpy((void *) msg, (void *) &message, sizeof(Message));
 					push_msg_back(msg);
 				}
 				break;
 			case FINISHED:
+				printf("%s Have finished message from %d\n", NODE, status.MPI_SOURCE);
 				if (msg = pop_msg()) {
 					printf("%s Sending peace of work to node %d, pop from stack\n", NODE, status.MPI_SOURCE);
 					MPI_Send((void *)msg, sizeof(Message)/sizeof(int), MPI_INT, status.MPI_SOURCE, TAG, MPI_COMM_WORLD);
@@ -368,7 +388,7 @@ void do_worker(int id) {
 
 	// Timer initialization
 	signal(SIGALRM, tmr);
-	alarm(TQ);
+	//alarm(TQ);
 
 	for (i = 3; i < n1; i++ ) {
 		triplets[0][i] = triplets[1][i] = triplets[2][i] = i;
@@ -398,6 +418,9 @@ void do_worker(int id) {
 		}
 
 		printf("%s Received message from dispatcher\n", NODE);
+		
+		//worker_is_busy = 1;
+		alarm(TQ);
 
 		for (i = 0; i <= message.level; ++i) {
 			stats[i].rearrangement = message.rearrangement[i];
@@ -415,6 +438,7 @@ void do_worker(int id) {
 		//run(0, 0);
 
 		message.status = FINISHED;
+		//worker_is_busy = 0;
 		printf("%s Finished\n", NODE);
 		MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
 	}
