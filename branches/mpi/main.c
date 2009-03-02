@@ -110,6 +110,8 @@ void tmr (int s) {
 	was_alarm = 1;
 }
 
+int gcc = 0;
+
 void find_parallel_config (int k, int level) {
 	int s, i, max_defects1;
 	FILE *f;
@@ -117,7 +119,7 @@ void find_parallel_config (int k, int level) {
 	for (i = 0; i < n; i++)
 		if (a[i] + i < n-2 || a[i] + i > n)
 			return;
-
+gcc++;
 	s = - 1 + (n & 1);
 	for (i = 1; i <= level + 1; i++) {
 		s -= (stats[i].generator & 1)*2 - 1;
@@ -275,7 +277,7 @@ void run(int level, int min_level) {
 						break;
 				}
 				printf("\n");
-				message.level = i-1;
+				message.level = i;
 				message.min_level = min_level;
 				min_level = i;
 				message.status = FORKED;
@@ -499,7 +501,7 @@ int main(int argc, char **argv) {
 		do_worker(myid);
 	}
 
-	printf("---------->>>%s terminated.\n", NODE);
+	printf("---------->>>%s terminated %d.\n", NODE, gcc);
 	MPI_Finalize();
 	return 0;
 }
