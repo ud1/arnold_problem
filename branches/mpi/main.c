@@ -16,8 +16,6 @@ int n, n_step;
 
 int triplets[rearrangement_count][n1]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
 
-char NODE[64];
-
 typedef struct {
 	int defects, generator, stack, processed;
 	int rearrangement;
@@ -40,6 +38,7 @@ int full = 0;
 int show_stat = 0;
 
 // MPI
+char NODE_NAME[64];
 int was_alarm = 0;
 
 enum {BUSY, FORKED, FINISHED, QUIT};
@@ -50,6 +49,7 @@ typedef struct {
 	int status;
 	int rearrangement[n_step1];
 	int rearr_index[n_step1];
+	int max_s[n1/2 + 1];
 } Message;
 
 // Message stack
@@ -126,7 +126,7 @@ void find_parallel_config (int k, int level) {
 	max_defects1 = ((n*(n+1)/2 - k - 3) - 3*max_s[k])/2;
 
 	if (strcmp(filename, "") == 0) {
-		printf("%s A(%d, %d) = %d; %d %d)", NODE, n, k, s, max_defects, max_defects1);
+		printf("%s A(%d, %d) = %d; %d %d)", NODE_NAME, n, k, s, max_defects, max_defects1);
 		for (i=1; i <= level+1; i++) {
 			printf(" %d", stats[i].generator);
 		}
@@ -134,7 +134,7 @@ void find_parallel_config (int k, int level) {
 		printf("\n");
 		if (show_stat)
 			for (i = 0; i < n/2 + 1; i++ )
-				printf("%s A(%d, %d) = %d;\n", NODE, n, i, max_s[i]);
+				printf("%s A(%d, %d) = %d;\n", NODE_NAME, n, i, max_s[i]);
 
 		fflush(NULL);
 		fflush(NULL);
@@ -170,8 +170,8 @@ void run(int level, int min_level) {
 	int curr_generator, direct, i;
 	Message message;
 
-	for (i = n/2; i--; )
-		max_s[i] = 0;
+//	for (i = n/2; i--; )
+//		max_s[i] = 0;
 	max_defects = max_defects_default;
 
 	for (i = n + 1; i--; ) {
@@ -256,7 +256,7 @@ void run(int level, int min_level) {
 			stats[level].rearr_index = -1;
 
 			if (was_alarm) {
-				printf("%s Alarm\n", NODE);
+				printf("%s Alarm\n", NODE_NAME);
 
 				was_alarm = 0;
 				alarm(TQ);
@@ -270,11 +270,13 @@ void run(int level, int min_level) {
 				min_level = i;
 				message.status = FORKED;
 
-				printf("%s message.level = %d\n", NODE, message.level);
+				printf("%s message.level = %d\n", NODE_NAME, message.level);
 				for (i = 0; i <= message.level; ++i) {
 					message.rearr_index[i] = stats[i].rearr_index;
 					message.rearrangement[i] = stats[i].rearrangement;
 				}
+				for (i = 0; i < n/2 + 1; i++)
+					message.max_s[i] = max_s[i];
 
 				MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
 
@@ -300,7 +302,7 @@ void do_dispatcher(int numprocs) {
 	MPI_Status status;
 	int worker, i;
 
-	printf("%s We have %d processes\n", NODE, numprocs);
+	printf("%s We have %d processes\n", NODE_NAME, numprocs);
 
 	// Message stack initializing
 	msg_init();
@@ -314,27 +316,32 @@ void do_dispatcher(int numprocs) {
 	message.status = BUSY;
 	message.rearrangement[0] = 0;
 	message.rearr_index[0] = -1;
+	for (i = 0; i < n/2 + 1; i++ )
+		message.max_s[i] = max_s[i] = 0;
 	set_wrk_state(1, BUSY);
 	MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 1, TAG, MPI_COMM_WORLD);
 
 	// Main loop
 	for (;;) {
-		printf("%s Waiting for a message\n", NODE);
+		printf("%s Waiting for a message\n", NODE_NAME);
 		memset((void *)&message, 0, sizeof(Message));
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, MPI_ANY_SOURCE, TAG, MPI_COMM_WORLD, &status);
 
+		for (i = 0; i < n/2 + 1; i++ )
+			message.max_s[i] = max_s[i] = max(message.max_s[i], max_s);
+
 		switch (message.status) {
 			case FORKED:
-				printf("%s Have message, level = %d\n", NODE, message.level);
+				printf("%s Have message, level = %d\n", NODE_NAME, message.level);
 				worker = get_worker(FINISHED);
 				if (worker != -1) {
 					set_wrk_state(worker, BUSY);
 					message.status = BUSY;
-					printf("%s Sending peace of work to node %d\n", NODE, worker);
+					printf("%s Sending peace of work to NODE_NAME %d\n", NODE_NAME, worker);
 					MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, worker, TAG, MPI_COMM_WORLD);
 				}
 				else {
-					printf("%s Push to stack\n", NODE);
+					printf("%s Push to stack\n", NODE_NAME);
 					msg = (Message *) malloc(sizeof(Message));
 					if (msg == NULL) {
 						printf ("Panic! Not enough memory!\n");
@@ -344,9 +351,9 @@ void do_dispatcher(int numprocs) {
 				}
 				break;
 			case FINISHED:
-				printf("%s Have finished message from %d\n", NODE, status.MPI_SOURCE);
+				printf("%s Have finished message from %d\n", NODE_NAME, status.MPI_SOURCE);
 				if (msg = pop_msg()) {
-					printf("%s Sending peace of work to node %d, pop from stack\n", NODE, status.MPI_SOURCE);
+					printf("%s Sending peace of work to NODE_NAME %d, pop from stack\n", NODE_NAME, status.MPI_SOURCE);
 					MPI_Send((void *)msg, sizeof(Message)/sizeof(int), MPI_INT, status.MPI_SOURCE, TAG, MPI_COMM_WORLD);
 					free(msg);
 				}
@@ -363,7 +370,7 @@ void do_dispatcher(int numprocs) {
 				}
 				break;
 			default:
-				printf("%s Status error\n", NODE);
+				printf("%s Status error\n", NODE_NAME);
 		}
 	}
 }
@@ -395,16 +402,18 @@ void do_worker(int id) {
 
 	for(;;) {
 		// receive from dispatcher:
-		printf("%s Waiting for a message from dispatcher\n", NODE);
+		printf("%s Waiting for a message from dispatcher\n", NODE_NAME);
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD, &status);
 
 		if (message.status == QUIT) {
-			printf("%s Received quit message\n", NODE);
+			printf("%s Received quit message\n", NODE_NAME);
 			break;
 		}
 
-		printf("%s Received message from dispatcher\n", NODE);
+		printf("%s Received message from dispatcher\n", NODE_NAME);
 
+		for (i = 0; i < n/2 + 1; i++)
+			max_s[i] = message.max_s[i];
 
 		for (i = 0; i <= message.level; ++i) {
 			stats[i].rearrangement = message.rearrangement[i];
@@ -416,13 +425,13 @@ void do_worker(int id) {
 			a[i] = i;
 		}
 
-		printf("%s Run, level = %d, minlevel = %d\n", NODE, message.level, message.min_level);
+		printf("%s Run, level = %d, minlevel = %d\n", NODE_NAME, message.level, message.min_level);
 
 		alarm(TQ);
 		run(message.level, message.min_level);
 
 		message.status = FINISHED;
-		printf("%s Finished\n", NODE);
+		printf("%s Finished\n", NODE_NAME);
 		MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
 	}
 }
@@ -474,15 +483,15 @@ int main(int argc, char **argv) {
 	MPI_Comm_rank(MPI_COMM_WORLD,&myid);
 
 	if(myid == 0) {
-		strcpy(NODE, "Dispatcher:");
+		strcpy(NODE_NAME, "Dispatcher:");
 		do_dispatcher(numprocs);
 	}
 	else {
-		sprintf(NODE, "Worker %d:", myid);
+		sprintf(NODE_NAME, "Worker %d:", myid);
 		do_worker(myid);
 	}
 
-	printf("---------->>>%s terminated.\n", NODE);
+	printf("---------->>>%s terminated.\n", NODE_NAME);
 	MPI_Finalize();
 	return 0;
 }
