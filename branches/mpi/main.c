@@ -63,11 +63,9 @@ void msg_init() {
 }
 
 void push_msg_back(Message *msg) {
-	printf("Dispatcher: Stack size is %d\n", msg_count);
 	if (++msg_count > msg_reserve)
 		messages = (Message**) realloc(messages, (msg_reserve*=2)*sizeof(Message*));
-	messages[msg_count-1] = msg;
-	printf("Dispatcher: Stack size is %d\n", msg_count);
+	messages[msg_count - 1] = msg;
 }
 
 Message *pop_msg() {
@@ -104,13 +102,8 @@ int set_wrk_state(int i, int state) {
 }
 
 void tmr (int s) {
-//	if (!worker_is_busy)
-//	    return;
-//	alarm(TQ);
 	was_alarm = 1;
 }
-
-int gcc = 0;
 
 void find_parallel_config (int k, int level) {
 	int s, i, max_defects1;
@@ -119,7 +112,7 @@ void find_parallel_config (int k, int level) {
 	for (i = 0; i < n; i++)
 		if (a[i] + i < n-2 || a[i] + i > n)
 			return;
-gcc++;
+
 	s = - 1 + (n & 1);
 	for (i = 1; i <= level + 1; i++) {
 		s -= (stats[i].generator & 1)*2 - 1;
@@ -164,8 +157,7 @@ gcc++;
 	}
 }
 
-//inline 
-void set (int curr_generator, int t) {
+inline void set (int curr_generator, int t) {
 	int i;
 
 	b_free += -2*t+1;
@@ -191,10 +183,8 @@ void run(int level, int min_level) {
 		stats[i].processed = 0;
 	}
 
-	for (i=0; i<level; ++i) {
+	for (i = 0; i < level; ++i) {
 		stats[i + 1].generator = curr_generator = stats[i].generator + triplets[stats[i].rearrangement][stats[i].rearr_index];
-		printf("{%d %d}", i+1, curr_generator);
-		printf("\n");
 		stats[i + 1].defects = stats[i].defects;
 		stats[i + 1].processed++;
 		if (!(curr_generator % 2)/* && (b_free*2 > n)*/) { // even, white
@@ -210,9 +200,8 @@ void run(int level, int min_level) {
 		d[curr_generator]++;
 		d[curr_generator + 2]++;
 		set(curr_generator, 1);
-		
 	}
-	
+
 	was_alarm = 0;
 
 	// Run
@@ -227,13 +216,12 @@ void run(int level, int min_level) {
 			stats[level + 1].generator = curr_generator;
 			stats[level + 1].processed++;
 			if (b_free <= n/2) {
-				//				printf("%d\n", b_free);
 				set(curr_generator, 1);
 				find_parallel_config(b_free + 1, level);
 				set(curr_generator, 0);
 			}
 			if (!b_free) {
-				//				count_gen(level);
+//				count_gen(level);
 				continue;
 			}
 			stats[level + 1].defects = stats[level].defects;
@@ -269,34 +257,32 @@ void run(int level, int min_level) {
 
 			if (was_alarm) {
 				printf("%s Alarm\n", NODE);
+
 				was_alarm = 0;
 				alarm(TQ);
-				for (i = min_level; i < n_step; ++i) {\
-					printf("<%d %d>", i, stats[i + 1].processed);
-					if (stats[i+1].processed > 1)
+				for (i = min_level; i < n_step; ++i) {
+					if (stats[i + 1].processed > 1)
 						break;
 				}
-				printf("\n");
-				message.level = i;
+
 				message.min_level = min_level;
+				message.level = i;
 				min_level = i;
 				message.status = FORKED;
+
 				printf("%s message.level = %d\n", NODE, message.level);
 				for (i = 0; i <= message.level; ++i) {
 					message.rearr_index[i] = stats[i].rearr_index;
 					message.rearrangement[i] = stats[i].rearrangement;
-					printf ("%d[%d] ", stats[i].rearrangement, stats[i].rearr_index);
 				}
-				for (i = 0; i < message.level; ++i)
-				    printf("{%d %d}", i+1, stats[i+1].generator);
-				printf("\n");
+
 				MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
 
-				for (i = 0; i <= n_step; ++i) {
+				for (i = 0; i <= n_step; ++i)
 					stats[i].processed = 1;
-				}
 			}
-		} else {
+		}
+		else {
 			curr_generator = stats[level].generator;
 			level--;
 			set(curr_generator, 0);
@@ -314,7 +300,7 @@ void do_dispatcher(int numprocs) {
 	MPI_Status status;
 	int worker, i;
 
-	printf("%s We have %d processors\n", NODE, numprocs);
+	printf("%s We have %d processes\n", NODE, numprocs);
 
 	// Message stack initializing
 	msg_init();
@@ -336,10 +322,7 @@ void do_dispatcher(int numprocs) {
 		printf("%s Waiting for a message\n", NODE);
 		memset((void *)&message, 0, sizeof(Message));
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, MPI_ANY_SOURCE, TAG, MPI_COMM_WORLD, &status);
-		
-		for (i=0; i <= message.level; ++i)
-			printf("%d(%d) ", message.rearrangement[i], message.rearr_index[i]);
-		printf("\n");
+
 		switch (message.status) {
 			case FORKED:
 				printf("%s Have message, level = %d\n", NODE, message.level);
@@ -349,11 +332,12 @@ void do_dispatcher(int numprocs) {
 					message.status = BUSY;
 					printf("%s Sending peace of work to node %d\n", NODE, worker);
 					MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, worker, TAG, MPI_COMM_WORLD);
-				} else {
+				}
+				else {
 					printf("%s Push to stack\n", NODE);
 					msg = (Message *) malloc(sizeof(Message));
 					if (msg == NULL) {
-					    printf ("Panic! Not enough memory!");
+						printf ("Panic! Not enough memory!\n");
 					}
 					memcpy((void *) msg, (void *) &message, sizeof(Message));
 					push_msg_back(msg);
@@ -365,7 +349,8 @@ void do_dispatcher(int numprocs) {
 					printf("%s Sending peace of work to node %d, pop from stack\n", NODE, status.MPI_SOURCE);
 					MPI_Send((void *)msg, sizeof(Message)/sizeof(int), MPI_INT, status.MPI_SOURCE, TAG, MPI_COMM_WORLD);
 					free(msg);
-				} else {
+				}
+				else {
 					set_wrk_state(status.MPI_SOURCE, FINISHED);
 					worker = get_worker(BUSY);
 					if (worker == -1) {
@@ -390,7 +375,6 @@ void do_worker(int id) {
 
 	// Timer initialization
 	signal(SIGALRM, tmr);
-	//alarm(TQ);
 
 	for (i = 3; i < n1; i++ ) {
 		triplets[0][i] = triplets[1][i] = triplets[2][i] = i;
@@ -420,27 +404,24 @@ void do_worker(int id) {
 		}
 
 		printf("%s Received message from dispatcher\n", NODE);
-		
-		//worker_is_busy = 1;
-		alarm(TQ);
+
 
 		for (i = 0; i <= message.level; ++i) {
 			stats[i].rearrangement = message.rearrangement[i];
 			stats[i].rearr_index = message.rearr_index[i];
 		}
 
-		printf("%s Run, level = %d, minlevel = %d\n", NODE, message.level, message.min_level);
 		b_free = (max_defects = n_step = n*(n-1) / 2) - 1;
 		for (i = 0; i < n; i++) {
 			a[i] = i;
 		}
+
+		printf("%s Run, level = %d, minlevel = %d\n", NODE, message.level, message.min_level);
+
+		alarm(TQ);
 		run(message.level, message.min_level);
-		//stats[0].rearrangement = 0;
-		//stats[0].rearr_index = -1;
-		//run(0, 0);
 
 		message.status = FINISHED;
-		//worker_is_busy = 0;
 		printf("%s Finished\n", NODE);
 		MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
 	}
@@ -449,18 +430,17 @@ void do_worker(int id) {
 int main(int argc, char **argv) {
 	int i;
 	char s[80];
-	char idstr[32];
 	int numprocs;
 	int myid;
 	MPI_Status mpi_stat; 
 
 	if (argc < 2) {
 		printf(
-			"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stats]\n"
+			"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat]\n"
 			"-n             line count;\n"
 			"-max-def       the number of allowed defects;\n"
 			"-full          output all found generator sets;\n"
-			"-stats         show stats after every generator set;\n"
+			"-stat          show stat after every generator set;\n"
 			"-o             output file.\n", argv[0]);
 		return 0;
 	}
@@ -475,15 +455,15 @@ int main(int argc, char **argv) {
 			strcpy(filename, argv[++i]);
 		else if (!strcmp("-full", s))
 			full = 1;
-		else if (!strcmp("-stats", s))
+		else if (!strcmp("-stat", s))
 			show_stat = 1;
 		else {		
 			printf(
-				"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stats]\n"
+				"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat]\n"
 				"-n             line count;\n"
 				"-max-def       the number of allowed defects;\n"
 				"-full          output all found generator sets;\n"
-				"-stats         show stats after every generator set;\n"
+				"-stat          show stat after every generator set;\n"
 				"-o             output file.\n", argv[0]);
 			return 0;
 		}
@@ -496,12 +476,13 @@ int main(int argc, char **argv) {
 	if(myid == 0) {
 		strcpy(NODE, "Dispatcher:");
 		do_dispatcher(numprocs);
-	} else {
+	}
+	else {
 		sprintf(NODE, "Worker %d:", myid);
 		do_worker(myid);
 	}
 
-	printf("---------->>>%s terminated %d.\n", NODE, gcc);
+	printf("---------->>>%s terminated.\n", NODE);
 	MPI_Finalize();
 	return 0;
 }
