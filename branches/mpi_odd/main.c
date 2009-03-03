@@ -14,9 +14,9 @@
 #define TQ 5
 #define TAG 0
 
-int n, n_step;
+int n, k = 0, n_step;
 
-int triplets[rearrangement_count][n1]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
+int triplets[rearrangement_count][plurality]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
 
 typedef struct {
 	int defects, generator, stack, processed;
@@ -28,7 +28,7 @@ Stats stats[n_step1 + 1];
 
 int a[n1], d[n1 + 1];
 
-int max_s[n1/2 + 1];
+int max_s;
 
 int b_free;
 int max_defects;
@@ -51,7 +51,7 @@ typedef struct {
 	int status;
 	int rearrangement[n_step1];
 	int rearr_index[n_step1];
-	int max_s[n1/2 + 1];
+	int max_s;
 } Message;
 
 // Message stack
@@ -107,13 +107,9 @@ void tmr (int s) {
 	was_alarm = 1;
 }
 
-void find_parallel_config (int k, int level) {
+void count_gen (int level) {
 	int s, i, max_defects1;
 	FILE *f;
-
-	for (i = 0; i < n; i++)
-		if (a[i] + i < n-2 || a[i] + i > n)
-			return;
 
 	s = - 1 + (n & 1);
 	for (i = 1; i <= level + 1; i++) {
@@ -121,11 +117,11 @@ void find_parallel_config (int k, int level) {
 	}
 	if (s < 0)
 		s = -s;
-	if (s < max_s[k] || !full && s == max_s[k])
+	if (s < max_s || !full && s == max_s)
 		return;
 
-	max_s[k] = s;
-	max_defects1 = ((n*(n+1)/2 - k - 3) - 3*max_s[k])/2;
+	max_s = s;
+	max_defects1 = ((n*(n+1)/2 - k - 3) - 3*max_s)/2;
 
 	if (strcmp(filename, "") == 0) {
 		printf("%s A(%d, %d) = %d; %d %d)", NODE_NAME, n, k, s, max_defects, max_defects1);
@@ -134,9 +130,6 @@ void find_parallel_config (int k, int level) {
 		}
 
 		printf("\n");
-		if (show_stat)
-			for (i = 0; i < n/2 + 1; i++ )
-				printf("%s A(%d, %d) = %d;\n", NODE_NAME, n, i, max_s[i]);
 
 		fflush(NULL);
 		fflush(NULL);
@@ -152,9 +145,6 @@ void find_parallel_config (int k, int level) {
 		}
 
 		fprintf(f, "\n");
-		if (show_stat)
-			for (i = 0; i < n/2 + 1; i++ )
-				fprintf(f, "A(%d, %d) = %d;\n", n, i, max_s[i]);
 		fclose(f);
 	}
 }
@@ -168,12 +158,10 @@ inline void set (int curr_generator, int t) {
 	a[curr_generator + 1] = i;
 }
 
-void run(int level, int min_level) {
+void run (int level, int min_level) {
 	int curr_generator, direct, i;
 	Message message;
 
-//	for (i = n/2; i--; )
-//		max_s[i] = 0;
 	max_defects = max_defects_default;
 
 	for (i = n + 1; i--; ) {
@@ -217,19 +205,17 @@ void run(int level, int min_level) {
 				continue;
 			stats[level + 1].generator = curr_generator;
 			stats[level + 1].processed++;
-			if (b_free <= n/2) {
+/*			if (b_free <= n/2) {
 				set(curr_generator, 1);
 				find_parallel_config(b_free + 1, level);
 				set(curr_generator, 0);
-			}
+			}*/
 			if (!b_free) {
-//				count_gen(level);
+				count_gen(level);
 				continue;
 			}
 			stats[level + 1].defects = stats[level].defects;
 			if (!(curr_generator % 2)/* && (b_free*2 > n)*/) { // even, white
-				if (d[curr_generator + 1] < 3) // '<3' for 0 defects, '==1' for full search
-					continue;
 				if (d[curr_generator] == 1) {
 					stats[level + 1].defects++;
 				}
@@ -239,6 +225,9 @@ void run(int level, int min_level) {
 				if (stats[level + 1].defects > max_defects) {
 					continue;
 				}
+				if (d[curr_generator + 1] < 3) // '<3' for 0 defects, '==1' for full search
+					continue;
+
 			}
 			stats[level+1].stack = d[curr_generator + 1];
 			d[curr_generator + 1] = 0;
@@ -277,8 +266,7 @@ void run(int level, int min_level) {
 					message.rearr_index[i] = stats[i].rearr_index;
 					message.rearrangement[i] = stats[i].rearrangement;
 				}
-				for (i = 0; i < n/2 + 1; i++)
-					message.max_s[i] = max_s[i];
+				message.max_s = max_s;
 
 				MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
 
@@ -318,8 +306,7 @@ void do_dispatcher(int numprocs) {
 	message.status = BUSY;
 	message.rearrangement[0] = 0;
 	message.rearr_index[0] = -1;
-	for (i = 0; i < n/2 + 1; i++ )
-		message.max_s[i] = max_s[i] = 0;
+	message.max_s = max_s = 0;
 	set_wrk_state(1, BUSY);
 	MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 1, TAG, MPI_COMM_WORLD);
 
@@ -329,8 +316,7 @@ void do_dispatcher(int numprocs) {
 		memset((void *)&message, 0, sizeof(Message));
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, MPI_ANY_SOURCE, TAG, MPI_COMM_WORLD, &status);
 
-		for (i = 0; i < n/2 + 1; i++ )
-			message.max_s[i] = max_s[i] = max(message.max_s[i], max_s[i]);
+		message.max_s = max_s = max(message.max_s, max_s);
 
 		switch (message.status) {
 			case FORKED:
@@ -385,7 +371,7 @@ void do_worker(int id) {
 	// Timer initialization
 	signal(SIGALRM, tmr);
 
-	for (i = 3; i < n1; i++ ) {
+	for (i = 3; i < plurality; i++ ) {
 		triplets[0][i] = triplets[1][i] = triplets[2][i] = i;
 	}
 
@@ -414,8 +400,7 @@ void do_worker(int id) {
 
 		printf("%s Received a message from the dispatcher\n", NODE_NAME);
 
-		for (i = 0; i < n/2 + 1; i++)
-			max_s[i] = message.max_s[i];
+		max_s = message.max_s;
 
 		for (i = 0; i <= message.level; ++i) {
 			stats[i].rearrangement = message.rearrangement[i];
@@ -423,9 +408,11 @@ void do_worker(int id) {
 		}
 
 		b_free = (max_defects = n_step = n*(n-1) / 2) - 1;
-		for (i = 0; i < n; i++) {
+		for (i = 0; i < n; i++)
 			a[i] = i;
-		}
+
+		for (i = k; i--; )
+			set(2*i, 1);
 
 		printf("%s Run, level = %d, minlevel = %d\n", NODE_NAME, message.level, message.min_level);
 
@@ -447,11 +434,11 @@ int main(int argc, char **argv) {
 
 	if (argc < 2) {
 		printf(
-			"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat]\n"
+			"Usage: %s -n N [-k K] [-max-def D] [-o filename] [-full]\n"
 			"-n             line count;\n"
+			"-k             0 by default;\n"
 			"-max-def       the number of allowed defects;\n"
 			"-full          output all found generator sets;\n"
-			"-stat          show stat after every generator set;\n"
 			"-o             output file.\n", argv[0]);
 		return 0;
 	}
@@ -460,21 +447,21 @@ int main(int argc, char **argv) {
 		strcpy(s, argv[i]);
 		if (!strcmp("-n", s))
 			sscanf(argv[++i], "%d", &n);
+		else if (!strcmp("-k", s))
+			sscanf(argv[++i], "%d", &k);
 		else if (!strcmp("-max-def", s))
 			sscanf(argv[++i], "%d", &max_defects_default);
 		else if (!strcmp("-o", s))
 			strcpy(filename, argv[++i]);
 		else if (!strcmp("-full", s))
 			full = 1;
-		else if (!strcmp("-stat", s))
-			show_stat = 1;
-		else {		
+		else {
 			printf(
-				"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat]\n"
+				"Usage: %s -n N [-k K] [-max-def D] [-o filename] [-full]\n"
 				"-n             line count;\n"
+				"-k             parallel pairs, 0 by default;\n"
 				"-max-def       the number of allowed defects;\n"
 				"-full          output all found generator sets;\n"
-				"-stat          show stat after every generator set;\n"
 				"-o             output file.\n", argv[0]);
 			return 0;
 		}
