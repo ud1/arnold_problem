@@ -3,6 +3,7 @@
 #include <string.h>
 #include <signal.h>
 
+#define min(a,b) ((a) < (b) ? (a) : (b))
 #define max(a,b) ((a) > (b) ? (a) : (b))
 
 #define n1 41
@@ -46,6 +47,7 @@ int was_alarm = 0;
 enum {BUSY, FORKED, FINISHED, QUIT};
 
 typedef struct {
+	int priority;
 	int level;
 	int min_level;
 	int status;
@@ -55,25 +57,119 @@ typedef struct {
 } Message;
 
 // Message stack
-Message **messages = NULL;
-int msg_reserve, msg_count;
+typedef struct {
+	Message **messages;
+	int reserve, count;
+} MessageStack;
+
+void Message_stack_init(MessageStack *stack) {
+	stack->reserve = 10;
+	stack->count = 0;
+	stack->messages = (Message**) malloc(stack->reserve*sizeof(Message*));
+}
+
+void Message_stack_release(MessageStack *stack) {
+	free(stack->messages);
+	free(stack);
+}
+
+void MessageStack_push_back(MessageStack *stack, const Message *msg) {
+	if (++stack->count > stack->reserve)
+		stack->messages = (Message**) realloc(stack->messages, (stack->reserve*=2)*sizeof(Message*));
+	stack->messages[stack->count - 1] = msg;
+}
+
+Message *MessageStack_pop(MessageStack *stack) {
+	if (stack->count)
+		return stack->messages[--stack->count];
+	return NULL;
+}
+
+typedef struct {
+	int priority;
+	MessageStack *stack;
+} Priority_MsgStackPtr_Pair;
+
+typedef struct {
+	Priority_MsgStackPtr_Pair *values;
+	int count, reserve;
+} Priority_MsgStack_Map;
+
+void Priority_MsgStack_Map_init(Priority_MsgStack_Map *m) {
+	m->count = 0;
+	m->reserve = 10;
+	m->values = (Priority_MsgStackPtr_Pair *) malloc(m->reserve*sizeof(Priority_MsgStackPtr_Pair));
+}
+
+Priority_MsgStackPtr_Pair *Priority_MsgStack_Map_get_value(Priority_MsgStack_Map *m, int priority) {
+	int i;
+	MessageStack *ptr;
+	for (i=0; i<m->count; ++i) {
+		if (m->values[i].priority == priority)
+			break;
+	}
+	if (i == m->count) {
+		if (++m->count > m->reserve)
+			m->values = (Priority_MsgStackPtr_Pair *) realloc(m->values, (m->reserve*=2)*sizeof(Priority_MsgStackPtr_Pair));
+		ptr = (MessageStack *) malloc(sizeof(MessageStack));
+		Message_stack_init(ptr);
+		m->values[m->count-1].priority = priority;
+		m->values[m->count-1].stack = ptr;
+		return &m->values[m->count-1];
+	} else {
+		return &m->values[i];
+	}
+}
+
+int Priority_MsgStack_Map_get_min_priority(Priority_MsgStack_Map *m) {
+	int i, priority = -1;
+	if (m->count) {
+		priority = m->values[0].priority;
+		for (i=1; i<m->count; ++i) {
+			priority = min(priority, m->values[i].priority);
+		}
+	}
+	return priority;
+}
+
+void Priority_MsgStack_Map_del_value(Priority_MsgStack_Map *m, int priority) {
+	int i;
+	MessageStack *ptr;
+	for (i=0; i<m->count; ++i) {
+		if (m->values[i].priority == priority)
+			break;
+	}
+	if (i != m->count) {
+		m->count--;
+		Message_stack_release(m->values[i].stack);
+		memcpy((void *)&m->values[i], (void *)&m->values[m->count], sizeof(Priority_MsgStackPtr_Pair));
+	}
+}
+
+// Priority Message Stack
+Priority_MsgStack_Map st_map;
 
 void msg_init() {
-	msg_reserve = 1000;
-	msg_count = 0;
-	messages = (Message**) malloc(msg_reserve*sizeof(Message*));
+	Priority_MsgStack_Map_init(&st_map);
 }
 
 void push_msg_back(Message *msg) {
-	if (++msg_count > msg_reserve)
-		messages = (Message**) realloc(messages, (msg_reserve*=2)*sizeof(Message*));
-	messages[msg_count - 1] = msg;
+	Priority_MsgStackPtr_Pair *p = Priority_MsgStack_Map_get_value(&st_map, msg->priority);
+	MessageStack_push_back(p->stack, msg);
 }
 
 Message *pop_msg() {
-	if (msg_count)
-		return messages[--msg_count];
-	return NULL;
+	Message *msg;
+	Priority_MsgStackPtr_Pair *p;
+	int min_priority = Priority_MsgStack_Map_get_min_priority(&st_map);
+	if (min_priority != -1) {
+		p = Priority_MsgStack_Map_get_value(&st_map, min_priority);
+		msg = MessageStack_pop(p->stack);
+		if (!p->stack->count) {
+			Priority_MsgStack_Map_del_value(&st_map, min_priority);
+		}
+		return msg;
+	} else return NULL;
 }
 
 // Workers state
@@ -149,7 +245,8 @@ void count_gen (int level) {
 	}
 }
 
-inline void set (int curr_generator, int t) {
+//inline 
+void set (int curr_generator, int t) {
 	int i;
 
 	b_free += -2*t+1;
@@ -158,7 +255,7 @@ inline void set (int curr_generator, int t) {
 	a[curr_generator + 1] = i;
 }
 
-void run (int level, int min_level) {
+void run (int level, int min_level, int priority) {
 	int curr_generator, direct, i;
 	Message message;
 
@@ -205,10 +302,10 @@ void run (int level, int min_level) {
 				continue;
 			stats[level + 1].generator = curr_generator;
 			stats[level + 1].processed++;
-/*			if (b_free <= n/2) {
-				set(curr_generator, 1);
-				find_parallel_config(b_free + 1, level);
-				set(curr_generator, 0);
+			/*			if (b_free <= n/2) {
+			set(curr_generator, 1);
+			find_parallel_config(b_free + 1, level);
+			set(curr_generator, 0);
 			}*/
 			if (!b_free) {
 				count_gen(level);
@@ -256,6 +353,7 @@ void run (int level, int min_level) {
 						break;
 				}
 
+				message.priority = priority;
 				message.min_level = min_level;
 				message.level = i;
 				min_level = i;
@@ -301,6 +399,7 @@ void do_dispatcher(int numprocs) {
 	wrk_init(numprocs-1);
 
 	// Sending first peace of work (root) to the first worker
+	message.priority = 0;
 	message.level = 0;
 	message.min_level = 0;
 	message.status = BUSY;
@@ -321,6 +420,7 @@ void do_dispatcher(int numprocs) {
 		switch (message.status) {
 			case FORKED:
 				printf("%s Have a message, level = %d\n", NODE_NAME, message.level);
+				message.priority++;
 				worker = get_worker(FINISHED);
 				if (worker != -1) {
 					set_wrk_state(worker, BUSY);
@@ -417,7 +517,7 @@ void do_worker(int id) {
 		printf("%s Run, level = %d, minlevel = %d\n", NODE_NAME, message.level, message.min_level);
 
 		alarm(TQ);
-		run(message.level, message.min_level);
+		run(message.level, message.min_level, message.priority);
 
 		message.status = FINISHED;
 		printf("%s Finished\n", NODE_NAME);
