@@ -441,7 +441,8 @@ void do_dispatcher(int numprocs) {
 		switch (message.status) {
 			case FORKED:
 				printf("%s Have a message, level = %d\n", NODE_NAME, message.level);
-				message.priority++;
+				//message.priority++;
+				message.priority = -message.level;
 				worker = get_worker(FINISHED);
 				if (worker != -1) {
 					set_wrk_state(worker, BUSY);
