@@ -174,7 +174,7 @@ Message *pop_msg() {
 			Priority_MsgStack_Map_del_value(&st_map, min_priority);
 		}
 		--msg_count;
-		printf("%s %d elements in stack", NODE_NAME, msg_count);
+		printf("%s %d elements in stack\n", NODE_NAME, msg_count);
 		return msg;
 	} else return NULL;
 }
@@ -524,10 +524,8 @@ void do_worker(int id) {
 
 		printf("%s Run, level = %d, minlevel = %d\n", NODE_NAME, message.level, message.min_level);
 
-		if (message.stack_size != num_workers) {
-			time_interval *= num_workers;
-			time_interval /= (message.stack_size - num_workers);
-		}
+		time_interval *= (message.stack_size - num_workers);
+		time_interval /= num_workers;
 
 		if (time_interval <= 0)
 			time_interval = 1;
