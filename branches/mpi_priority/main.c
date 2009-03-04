@@ -407,6 +407,7 @@ void do_dispatcher(int numprocs) {
 	wrk_init(numprocs-1);
 
 	// Sending first peace of work (root) to the first worker
+	message.time_interval = TQ;
 	message.priority = 0;
 	message.level = 0;
 	message.min_level = 0;
