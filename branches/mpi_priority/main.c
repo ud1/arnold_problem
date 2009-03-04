@@ -12,7 +12,8 @@
 #define plurality 3
 #define rearrangement_count 3
 
-#define TQ 10
+#define TQ 5
+#define MAXTQ 120
 #define TAG 0
 
 int n, k = 0, n_step;
@@ -427,10 +428,13 @@ void do_dispatcher(int numprocs) {
 		message.max_s = max_s = max(message.max_s, max_s);
 
 		ratio = (float)(msg_count - num_workers) / (float) num_workers;
-		time_interval *= 1.0f + (ratio - 1.0f) / num_workers;
+		time_interval *= (1.0f + (ratio - 1.0f) / num_workers);
 
-		if (time_interval <= 0)
-			time_interval = 1;
+		if (time_interval < TQ)
+			time_interval = TQ;
+
+		if (time_interval > MAXTQ)
+			time_interval = MAXTQ;
 
 		message.time_interval = time_interval;
 
@@ -590,13 +594,13 @@ int main(int argc, char **argv) {
 	MPI_Comm_size(MPI_COMM_WORLD,&numprocs);
 	MPI_Comm_rank(MPI_COMM_WORLD,&myid);
 
+	num_workers = numprocs - 1;
 	if(myid == 0) {
 		strcpy(NODE_NAME, "Dispatcher:");
 		do_dispatcher(numprocs);
 	}
 	else {
 		sprintf(NODE_NAME, "Worker %d:", myid);
-		num_workers = numprocs - 1;
 		do_worker(myid);
 	}
 
