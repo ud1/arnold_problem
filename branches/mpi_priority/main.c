@@ -56,7 +56,7 @@ typedef struct {
 	int rearrangement[n_step1];
 	int rearr_index[n_step1];
 	int max_s;
-	int stack_size;
+	int time_interval;
 } Message;
 
 // Message stack
@@ -396,6 +396,7 @@ void do_dispatcher(int numprocs) {
 	Message message, *msg;
 	MPI_Status status;
 	int worker, i;
+	float ratio;
 
 	printf("%s We have %d processes\n", NODE_NAME, numprocs);
 
@@ -423,7 +424,14 @@ void do_dispatcher(int numprocs) {
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, MPI_ANY_SOURCE, TAG, MPI_COMM_WORLD, &status);
 
 		message.max_s = max_s = max(message.max_s, max_s);
-		message.stack_size = msg_count;
+
+		ratio = (float)(msg_count - num_workers) / (float) num_workers;
+		time_interval *= 1.0f + (ratio - 1.0f) / num_workers;
+
+		if (time_interval <= 0)
+			time_interval = 1;
+
+		message.time_interval = time_interval;
 
 		switch (message.status) {
 			case FORKED:
@@ -522,13 +530,9 @@ void do_worker(int id) {
 		for (i = k; i--; )
 			set(2*i, 1);
 
-		printf("%s Run, level = %d, minlevel = %d\n", NODE_NAME, message.level, message.min_level);
 
-		time_interval *= (message.stack_size - num_workers);
-		time_interval /= num_workers;
-
-		if (time_interval <= 0)
-			time_interval = 1;
+		time_interval = message.time_interval;
+		printf("%s Run, level = %d, minlevel = %d, alarm_interval = %d\n", NODE_NAME, message.level, message.min_level, time_interval);
 
 		alarm(time_interval);
 		run(message.level, message.min_level, message.priority);
