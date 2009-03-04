@@ -12,10 +12,12 @@
 #define plurality 3
 #define rearrangement_count 3
 
-#define TQ 5
+#define TQ 10
 #define TAG 0
 
 int n, k = 0, n_step;
+int time_interval = TQ;
+int num_workers;
 
 int triplets[rearrangement_count][plurality]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
 
@@ -54,6 +56,7 @@ typedef struct {
 	int rearrangement[n_step1];
 	int rearr_index[n_step1];
 	int max_s;
+	int stack_size;
 } Message;
 
 // Message stack
@@ -62,13 +65,13 @@ typedef struct {
 	int reserve, count;
 } MessageStack;
 
-void Message_stack_init(MessageStack *stack) {
+void MessageStack_init(MessageStack *stack) {
 	stack->reserve = 10;
 	stack->count = 0;
 	stack->messages = (Message**) malloc(stack->reserve*sizeof(Message*));
 }
 
-void Message_stack_release(MessageStack *stack) {
+void MessageStack_release(MessageStack *stack) {
 	free(stack->messages);
 	free(stack);
 }
@@ -112,7 +115,7 @@ Priority_MsgStackPtr_Pair *Priority_MsgStack_Map_get_value(Priority_MsgStack_Map
 		if (++m->count > m->reserve)
 			m->values = (Priority_MsgStackPtr_Pair *) realloc(m->values, (m->reserve*=2)*sizeof(Priority_MsgStackPtr_Pair));
 		ptr = (MessageStack *) malloc(sizeof(MessageStack));
-		Message_stack_init(ptr);
+		MessageStack_init(ptr);
 		m->values[m->count-1].priority = priority;
 		m->values[m->count-1].stack = ptr;
 		return &m->values[m->count-1];
@@ -141,13 +144,14 @@ void Priority_MsgStack_Map_del_value(Priority_MsgStack_Map *m, int priority) {
 	}
 	if (i != m->count) {
 		m->count--;
-		Message_stack_release(m->values[i].stack);
+		MessageStack_release(m->values[i].stack);
 		memcpy((void *)&m->values[i], (void *)&m->values[m->count], sizeof(Priority_MsgStackPtr_Pair));
 	}
 }
 
 // Priority Message Stack
 Priority_MsgStack_Map st_map;
+int msg_count = 0;
 
 void msg_init() {
 	Priority_MsgStack_Map_init(&st_map);
@@ -156,6 +160,7 @@ void msg_init() {
 void push_msg_back(Message *msg) {
 	Priority_MsgStackPtr_Pair *p = Priority_MsgStack_Map_get_value(&st_map, msg->priority);
 	MessageStack_push_back(p->stack, msg);
+	++msg_count;
 }
 
 Message *pop_msg() {
@@ -168,6 +173,8 @@ Message *pop_msg() {
 		if (!p->stack->count) {
 			Priority_MsgStack_Map_del_value(&st_map, min_priority);
 		}
+		--msg_count;
+		printf("%s %d elements in stack", NODE_NAME, msg_count);
 		return msg;
 	} else return NULL;
 }
@@ -347,7 +354,7 @@ void run (int level, int min_level, int priority) {
 				printf("%s Alarm\n", NODE_NAME);
 
 				was_alarm = 0;
-				alarm(TQ);
+				alarm(time_interval);
 				for (i = min_level; i < n_step; ++i) {
 					if (stats[i + 1].processed > 1)
 						break;
@@ -416,6 +423,7 @@ void do_dispatcher(int numprocs) {
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, MPI_ANY_SOURCE, TAG, MPI_COMM_WORLD, &status);
 
 		message.max_s = max_s = max(message.max_s, max_s);
+		message.stack_size = msg_count;
 
 		switch (message.status) {
 			case FORKED:
@@ -516,7 +524,15 @@ void do_worker(int id) {
 
 		printf("%s Run, level = %d, minlevel = %d\n", NODE_NAME, message.level, message.min_level);
 
-		alarm(TQ);
+		if (message.stack_size != num_workers) {
+			time_interval *= num_workers;
+			time_interval /= (message.stack_size - num_workers);
+		}
+
+		if (time_interval <= 0)
+			time_interval = 1;
+
+		alarm(time_interval);
 		run(message.level, message.min_level, message.priority);
 
 		message.status = FINISHED;
@@ -577,6 +593,7 @@ int main(int argc, char **argv) {
 	}
 	else {
 		sprintf(NODE_NAME, "Worker %d:", myid);
+		num_workers = numprocs - 1;
 		do_worker(myid);
 	}
 
