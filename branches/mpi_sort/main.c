@@ -66,7 +66,11 @@ void msg_init() {
 
 int msg_compare (const void * a, const void * b)
 {
-	int *p1 = (* (Message **) a)->rearr_index, *p2 = (* (Message **) b)->rearr_index, *endp1 = p1 + level;
+	Message *ma = (* (Message **) a), *mb = (* (Message **) b);
+
+	int *p1 = ma->rearr_index, *p2 = mb->rearr_index, 
+		level = min(ma->level, mb->level), *endp1 = p1 + level + 1;
+
 	for (; !(*p2 - *p1) && p1 < endp1; ++p1, ++p2);
 	return *p2 - *p1;
 }
