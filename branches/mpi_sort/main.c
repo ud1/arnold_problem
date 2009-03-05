@@ -66,8 +66,8 @@ void msg_init() {
 
 int msg_compare (const void * a, const void * b)
 {
-	int *p1 = (* (Message **) a)->rearr_index, *p2 = (* (Message **) b)->rearr_index;
-	for (; *p2 - *p1; ++p1, ++p2);
+	int *p1 = (* (Message **) a)->rearr_index, *p2 = (* (Message **) b)->rearr_index, *endp1 = p1 + level;
+	for (; !(*p2 - *p1) && p1 < endp1; ++p1, ++p2);
 	return *p2 - *p1;
 }
 
@@ -217,11 +217,7 @@ void run (int level, int min_level) {
 				continue;
 			stats[level + 1].generator = curr_generator;
 			stats[level + 1].processed++;
-			/*			if (b_free <= n/2) {
-			set(curr_generator, 1);
-			find_parallel_config(b_free + 1, level);
-			set(curr_generator, 0);
-			}*/
+
 			if (!b_free) {
 				count_gen(level);
 				continue;
