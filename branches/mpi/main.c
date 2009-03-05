@@ -4,6 +4,7 @@
 #include <signal.h>
 
 #define max(a,b) ((a) > (b) ? (a) : (b))
+#define min(a,b) ((a) < (b) ? (a) : (b))
 
 #define n1 41
 #define n_step1 (n1*(n1-1) / 2)
@@ -64,10 +65,27 @@ void msg_init() {
 	messages = (Message**) malloc(msg_reserve*sizeof(Message*));
 }
 
+int msg_compare (const void * a, const void * b) 
+{ 
+	Message *ma = (* (Message **) a), *mb = (* (Message **) b); 
+
+	int *p1 = ma->rearr_index, *p2 = mb->rearr_index,  
+		level = min(ma->level, mb->level), *endp1 = p1 + level + 1; 
+
+	for (; !(*p2 - *p1) && p1 < endp1; ++p1, ++p2); 
+	return *p2 - *p1; 
+} 
+
+void msg_sort() { 
+	qsort(messages, msg_count, sizeof(Message *), msg_compare); 
+}
+
 void push_msg_back(Message *msg) {
 	if (++msg_count > msg_reserve)
 		messages = (Message**) realloc(messages, (msg_reserve*=2)*sizeof(Message*));
 	messages[msg_count - 1] = msg;
+	msg_sort();
+	printf("------->  %d in stack  <-------\n", msg_count);
 }
 
 Message *pop_msg() {
@@ -172,8 +190,8 @@ void run(int level, int min_level) {
 	int curr_generator, direct, i;
 	Message message;
 
-//	for (i = n/2; i--; )
-//		max_s[i] = 0;
+	//	for (i = n/2; i--; )
+	//		max_s[i] = 0;
 	max_defects = max_defects_default;
 
 	for (i = n + 1; i--; ) {
@@ -223,7 +241,7 @@ void run(int level, int min_level) {
 				set(curr_generator, 0);
 			}
 			if (!b_free) {
-//				count_gen(level);
+				//				count_gen(level);
 				continue;
 			}
 			stats[level + 1].defects = stats[level].defects;
