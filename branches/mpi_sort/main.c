@@ -4,6 +4,7 @@
 #include <signal.h>
 
 #define max(a,b) ((a) > (b) ? (a) : (b))
+#define min(a,b) ((a) < (b) ? (a) : (b))
 
 #define n1 41
 #define n_step1 (n1*(n1-1) / 2)
