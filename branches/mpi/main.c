@@ -261,21 +261,13 @@ void run(int level, int min_level) {
 					continue;
 				}
 			}
-			stats[level+1].stack = d[curr_generator + 1];
+			stats[level + 1].stack = d[curr_generator + 1];
 			d[curr_generator + 1] = 0;
 			d[curr_generator]++;
 			d[curr_generator + 2]++;
 			set(curr_generator, 1);
 			level++;
-			//stats[level].rearrangement = direct > 0 ? 1 : 2;
-			if (direct > 0) {
-				if (curr_generator % 2)
-					stats[level].rearrangement = 1;
-				else
-					stats[level].rearrangement = 0;
-			}
-			else
-				stats[level].rearrangement = 2;
+			stats[level].rearrangement = direct > 0 ? 1 : 2;
 			stats[level].rearr_index = -1;
 
 			if (was_alarm) {
@@ -314,7 +306,7 @@ void run(int level, int min_level) {
 			set(curr_generator, 0);
 			d[curr_generator]--;
 			d[curr_generator + 2]--;
-			d[curr_generator + 1] = stats[level+1].stack;
+			d[curr_generator + 1] = stats[level + 1].stack;
 			if (level == min_level)
 				break;
 		}
