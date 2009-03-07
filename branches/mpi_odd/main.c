@@ -78,7 +78,7 @@ int msg_compare (const void * a, const void * b) {
 	p2 = mb->rearr_index;
 	endp = p1 + min(ma->level, mb->level); 
 
-	for (; !(*p2 - *p1) && p1 <= endp1; ++p1, ++p2); 
+	for (; !(*p2 - *p1) && p1 <= endp; ++p1, ++p2); 
 
 	count_compare++;
 
