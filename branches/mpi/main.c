@@ -66,7 +66,7 @@ void msg_init() {
 }
 
 int msg_compare (const void * a, const void * b) { 
-	Message *ma, mb;
+	Message *ma, *mb;
 	int *p1, *p2, *endp;
 
 	ma = * (Message **) a;
