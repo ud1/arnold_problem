@@ -65,6 +65,8 @@ void msg_init() {
 	messages = (Message**) malloc(msg_reserve*sizeof(Message*));
 }
 
+int count_compare;
+
 int msg_compare (const void * a, const void * b) { 
 	Message *ma, mb;
 	int *p1, *p2, *endp;
@@ -78,6 +80,8 @@ int msg_compare (const void * a, const void * b) {
 
 	for (; !(*p2 - *p1) && p1 <= endp1; ++p1, ++p2); 
 
+	count_compare++;
+
 	return *p2 - *p1; 
 } 
 
@@ -89,8 +93,9 @@ void push_msg_back(Message *msg) {
 	if (++msg_count > msg_reserve)
 		messages = (Message**) realloc(messages, (msg_reserve*=2)*sizeof(Message*));
 	messages[msg_count - 1] = msg;
+	count_compare = 0;
 	msg_sort();
-	printf("------->  %d in stack  <-------\n", msg_count);
+	printf("------->  %d in stack [%d times compared while sorting]  <-------\n", msg_count, count_compare);
 }
 
 Message *pop_msg() {
