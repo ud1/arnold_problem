@@ -6,7 +6,7 @@
 #define max(a,b) ((a) > (b) ? (a) : (b))
 #define min(a,b) ((a) < (b) ? (a) : (b))
 
-#define n1 41
+#define n1 43
 #define n_step1 (n1*(n1-1) / 2)
 
 #define plurality 3
@@ -17,7 +17,7 @@
 
 int n, n_step;
 
-int triplets[rearrangement_count][n1]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
+int triplets[rearrangement_count][plurality]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
 
 typedef struct {
 	int defects, generator, stack, processed;
@@ -62,17 +62,22 @@ int msg_reserve, msg_count;
 void msg_init() {
 	msg_reserve = 1000;
 	msg_count = 0;
-	messages = (Message**) malloc(msg_reserve*sizeof(Message*));
+	messages = (Message**) malloc(msg_reserve * sizeof(Message *));
 }
 
-int msg_compare (const void * a, const void * b) 
-{ 
-	Message *ma = (* (Message **) a), *mb = (* (Message **) b); 
+int msg_compare (const void * a, const void * b) { 
+	Message *ma, mb;
+	int *p1, *p2, *endp;
 
-	int *p1 = ma->rearr_index, *p2 = mb->rearr_index,  
-		level = min(ma->level, mb->level), *endp1 = p1 + level + 1; 
+	ma = * (Message **) a;
+	mb = * (Message **) b;
 
-	for (; !(*p2 - *p1) && p1 < endp1; ++p1, ++p2); 
+	p1 = ma->rearr_index;
+	p2 = mb->rearr_index;
+	endp = p1 + min(ma->level, mb->level); 
+
+	for (; !(*p2 - *p1) && p1 <= endp1; ++p1, ++p2); 
+
 	return *p2 - *p1; 
 } 
 
@@ -82,7 +87,7 @@ void msg_sort() {
 
 void push_msg_back(Message *msg) {
 	if (++msg_count > msg_reserve)
-		messages = (Message**) realloc(messages, (msg_reserve*=2)*sizeof(Message*));
+		messages = (Message **) realloc(messages, (msg_reserve *= 2)*sizeof(Message *));
 	messages[msg_count - 1] = msg;
 	msg_sort();
 	printf("------->  %d in stack  <-------\n", msg_count);
@@ -190,8 +195,6 @@ void run(int level, int min_level) {
 	int curr_generator, direct, i;
 	Message message;
 
-	//	for (i = n/2; i--; )
-	//		max_s[i] = 0;
 	max_defects = max_defects_default;
 
 	for (i = n + 1; i--; ) {
@@ -241,7 +244,7 @@ void run(int level, int min_level) {
 				set(curr_generator, 0);
 			}
 			if (!b_free) {
-				//				count_gen(level);
+				//count_gen(level);
 				continue;
 			}
 			stats[level + 1].defects = stats[level].defects;
@@ -264,7 +267,7 @@ void run(int level, int min_level) {
 			d[curr_generator + 2]++;
 			set(curr_generator, 1);
 			level++;
-			//			stats[level].rearrangement = direct > 0 ? 1 : 2;
+			//stats[level].rearrangement = direct > 0 ? 1 : 2;
 			if (direct > 0) {
 				if (curr_generator % 2)
 					stats[level].rearrangement = 1;
@@ -295,8 +298,9 @@ void run(int level, int min_level) {
 					message.rearr_index[i] = stats[i].rearr_index;
 					message.rearrangement[i] = stats[i].rearrangement;
 				}
-				for (i = 0; i < n/2 + 1; i++)
+				for (i = 0; i < n/2 + 1; i++) {
 					message.max_s[i] = max_s[i];
+				}
 
 				MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
 
@@ -347,8 +351,9 @@ void do_dispatcher(int numprocs) {
 		memset((void *)&message, 0, sizeof(Message));
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, MPI_ANY_SOURCE, TAG, MPI_COMM_WORLD, &status);
 
-		for (i = 0; i < n/2 + 1; i++ )
+		for (i = 0; i < n/2 + 1; i++ ) {
 			message.max_s[i] = max_s[i] = max(message.max_s[i], max_s[i]);
+		}
 
 		switch (message.status) {
 			case FORKED:
@@ -403,7 +408,7 @@ void do_worker(int id) {
 	// Timer initialization
 	signal(SIGALRM, tmr);
 
-	for (i = 3; i < n1; i++ ) {
+	for (i = 3; i < plurality; i++ ) {
 		triplets[0][i] = triplets[1][i] = triplets[2][i] = i;
 	}
 
@@ -432,8 +437,9 @@ void do_worker(int id) {
 
 		printf("%s Received a message from the dispatcher\n", NODE_NAME);
 
-		for (i = 0; i < n/2 + 1; i++)
+		for (i = 0; i < n/2 + 1; i++) {
 			max_s[i] = message.max_s[i];
+		}
 
 		for (i = 0; i <= message.level; ++i) {
 			stats[i].rearrangement = message.rearrangement[i];

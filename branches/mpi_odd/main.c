@@ -6,7 +6,7 @@
 #define max(a,b) ((a) > (b) ? (a) : (b))
 #define min(a,b) ((a) < (b) ? (a) : (b))
 
-#define n1 41
+#define n1 43
 #define n_step1 (n1*(n1-1) / 2)
 
 #define plurality 3
@@ -65,16 +65,21 @@ void msg_init() {
 	messages = (Message**) malloc(msg_reserve*sizeof(Message*));
 }
 
-int msg_compare (const void * a, const void * b)
-{
-	Message *ma = (* (Message **) a), *mb = (* (Message **) b);
+int msg_compare (const void * a, const void * b) { 
+	Message *ma, mb;
+	int *p1, *p2, *endp;
 
-	int *p1 = ma->rearr_index, *p2 = mb->rearr_index, 
-		level = min(ma->level, mb->level), *endp1 = p1 + level + 1;
+	ma = * (Message **) a;
+	mb = * (Message **) b;
 
-	for (; !(*p2 - *p1) && p1 < endp1; ++p1, ++p2);
-	return *p2 - *p1;
-}
+	p1 = ma->rearr_index;
+	p2 = mb->rearr_index;
+	endp = p1 + min(ma->level, mb->level); 
+
+	for (; !(*p2 - *p1) && p1 <= endp1; ++p1, ++p2); 
+
+	return *p2 - *p1; 
+} 
 
 void msg_sort() {
 	qsort(messages, msg_count, sizeof(Message *), msg_compare);
@@ -85,6 +90,7 @@ void push_msg_back(Message *msg) {
 		messages = (Message**) realloc(messages, (msg_reserve*=2)*sizeof(Message*));
 	messages[msg_count - 1] = msg;
 	msg_sort();
+	printf("------->  %d in stack  <-------\n", msg_count);
 }
 
 Message *pop_msg() {
@@ -100,7 +106,7 @@ int wrk_count;
 void wrk_init(int cnt) {
 	int i;
 	wrk_count = cnt;
-	wrk_state = (int *) malloc(wrk_count*sizeof(int));
+	wrk_state = (int *) malloc(wrk_count * sizeof(int));
 	for (i = 0; i < wrk_count; ++i) {
 		wrk_state[i] = FINISHED;
 	}
@@ -248,12 +254,12 @@ void run (int level, int min_level) {
 			d[curr_generator + 2]++;
 			set(curr_generator, 1);
 			level++;
-			//			stats[level].rearrangement = direct > 0 ? 1 : 2;
+			//stats[level].rearrangement = direct > 0 ? 1 : 2;
 			if (direct > 0) {
-				if (curr_generator % 2)
+				//if (curr_generator % 2)
 					stats[level].rearrangement = 1;
-				else
-					stats[level].rearrangement = 0;
+				//else
+					//stats[level].rearrangement = 0;
 			}
 			else
 				stats[level].rearrangement = 2;
@@ -421,11 +427,13 @@ void do_worker(int id) {
 		}
 
 		b_free = (max_defects = n_step = n*(n-1) / 2) - 1;
-		for (i = 0; i < n; i++)
+		for (i = 0; i < n; i++) {
 			a[i] = i;
+		}
 
-		for (i = k; i--; )
+		for (i = k; i--; ) {
 			set(2*i, 1);
+		}
 
 		printf("%s Run, level = %d, minlevel = %d\n", NODE_NAME, message.level, message.min_level);
 
