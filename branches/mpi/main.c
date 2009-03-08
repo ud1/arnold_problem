@@ -426,8 +426,7 @@ void do_dispatcher(int numprocs) {
 		memset((void *)&message, 0, sizeof(Message));
 
 		gettimeofday(&t4, NULL);
-		idle_time =  (t4.tv_sec - t3.tv_usec)*1000 + (t4.tv_usec - t3.tv_usec)/1000;
-		run_time =  (t3.tv_sec - t4.tv_usec)*1000 + (t3.tv_usec - t4.tv_usec)/1000;
+		run_time =  (t4.tv_sec - t3.tv_usec)*1000 + (t4.tv_usec - t3.tv_usec)/1000;
 		timings.d_run_time += run_time;
 
 		MPI_Recv((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, MPI_ANY_SOURCE, TAG, MPI_COMM_WORLD, &status);
