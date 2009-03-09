@@ -9,7 +9,7 @@
 
 int n, n_step;
 
-int triplets[rearrangement_count][n1]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
+int triplets[rearrangement_count][plurality]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
 
 typedef struct {
 	int defects, generator, stack;
@@ -23,7 +23,6 @@ int a[n1], d[n1 + 1];
 
 int max_s[n1/2 + 1];
 
-int b_free;
 int max_defects;
 
 // User input
@@ -32,29 +31,31 @@ int max_defects_default = 0;
 int full = 0;
 int show_stat = 0;
 
-void find_parallel_config (int k, int level) {
+// 1 if this is a real configuration.
+// 0 if generators in brackets do not commute.
+int find_parallel_config (int k, int level) {
 	int s, i, max_defects1;
 	FILE *f;
 
 	for (i = 0; i < n; i++)
 		if (a[i] + i < n-2 || a[i] + i > n)
-			return;
+			return 0;
 
 	s = - 1 + (n & 1);
-	for (i = 1; i <= level + 1; i++) {
+	for (i = 1; i <= level; i++) {
 		s -= (stat[i].generator & 1)*2 - 1;
 	}
 	if (s < 0)
 		s = -s;
 	if (s < max_s[k] || !full && s == max_s[k])
-		return;
+		return 1;
 
 	max_s[k] = s;
-	max_defects1 = ((n*(n+1)/2 - k - 3) - 3*max_s[k])/2;
+	max_defects1 = ((n*(n + 1)/2 - k - 3) - 3*max_s[k])/2;
 
 	if (strcmp(filename, "") == 0) {
 		printf("A(%d, %d) = %d; %d %d)", n, k, s, max_defects, max_defects1);
-		for (i=1; i <= level+1; i++) {
+		for (i = 1; i <= level; i++) {
 			printf(" %d", stat[i].generator);
 		}
 
@@ -72,7 +73,7 @@ void find_parallel_config (int k, int level) {
 		f = fopen(filename, "a");
 
 		fprintf(f, "A(%d, %d) = %d; %d %d)", n, k, s, max_defects, max_defects1);
-		for (i=1; i <= level+1; i++) {
+		for (i=1; i <= level; i++) {
 			fprintf(f, " %d", stat[i].generator);
 		}
 
@@ -82,19 +83,20 @@ void find_parallel_config (int k, int level) {
 				fprintf(f, "A(%d, %d) = %d;\n", n, i, max_s[i]);
 		fclose(f);
 	}
+
+	return 1;
 }
 
-void inline set (int curr_generator, int t) {
+inline void set (int curr_generator) {
 	int i;
 
-	b_free += -2*t+1;
 	i = a[curr_generator];
 	a[curr_generator] = a[curr_generator + 1];
 	a[curr_generator + 1] = i;
 }
 
 void new1 (int level) {
-	int curr_generator, direct, i;
+	int curr_generator, direct, i, flag;
 
 	for (i = n/2; i--; )
 		max_s[i] = 0;
@@ -114,13 +116,16 @@ void new1 (int level) {
 			if (a[curr_generator] > a[curr_generator + 1])
 				continue;
 			stat[level + 1].generator = curr_generator;
-			if (b_free <= n/2) {
+			if (n_step - 1 - level <= n/2 && (curr_generator % 2)) {
 //				printf("%d\n", b_free);
-				set(curr_generator, 1);
-				find_parallel_config(b_free + 1, level);
-				set(curr_generator, 0);
+				set(curr_generator);
+				flag = find_parallel_config(n_step - level - 1, level + 1);
+				set(curr_generator);
+				if (flag) {
+					continue;
+				}
 			}
-			if (!b_free) {
+			if (!(n_step - 1 - level)) {
 //				count_gen(level);
 				continue;
 			}
@@ -195,7 +200,7 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	b_free = (max_defects = n_step = n*(n-1) / 2) - 1;
+	max_defects = n_step = n*(n-1) / 2;
 
 	for (i = 0; i < n; i++) {
 		a[i] = i;
@@ -203,7 +208,7 @@ int main(int argc, char **argv) {
 
 	//{{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
 
-	for (i = 3; i < n1; i++ ) {
+	for (i = 3; i < plurality; i++ ) {
 		triplets[0][i] = triplets[1][i] = triplets[2][i] = i;
 	}
 
