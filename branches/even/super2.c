@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <strings.h>
+#include <time.h>
 
 #define n1 40
 #define n_step1 (n1*(n1-1) / 2)
@@ -54,7 +55,7 @@ int find_parallel_config (int k, int level) {
 	max_defects1 = ((n*(n + 1)/2 - k - 3) - 3*max_s[k])/2;
 
 	if (strcmp(filename, "") == 0) {
-		printf("A(%d, %d) = %d; %d %d)", n, k, s, max_defects, max_defects1);
+		printf("%s:\nA(%d, %d) = %d; %d %d)", ctime(time(NULL)), n, k, s, max_defects, max_defects1);
 		for (i = 1; i <= level; i++) {
 			printf(" %d", stat[i].generator);
 		}
@@ -117,7 +118,6 @@ void new1 (int level) {
 				continue;
 			stat[level + 1].generator = curr_generator;
 			if (n_step - 1 - level <= n/2 && (curr_generator % 2)) {
-//				printf("%d\n", b_free);
 				set(curr_generator);
 				flag = find_parallel_config(n_step - level - 1, level + 1);
 				set(curr_generator);
@@ -200,6 +200,8 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	printf("---------->>>Process started at %s.\n", ctime(time(NULL)));
+
 	max_defects = n_step = n*(n-1) / 2;
 
 	for (i = 0; i < n; i++) {
@@ -228,7 +230,7 @@ int main(int argc, char **argv) {
 
 	new1(0);
 
-	printf("---------->>>Process terminated.\n");
+	printf("---------->>>Process terminated at %s.\n", ctime(time(NULL)));
 	for (i = n/2 + 1; i--; )
 		printf("A(%d, %d) = %d;\n", n, i, max_s[i]);
 	return 0;
