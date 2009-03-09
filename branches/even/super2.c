@@ -133,8 +133,6 @@ void new1 (int level) {
 			}
 			stat[level + 1].defects = stat[level].defects;
 			if (!(curr_generator % 2)/* && (b_free*2 > n)*/) { // even, white
-				if (d[curr_generator + 1] < 3) // '<3' for 0 defects, '==1' for full search
-					continue;
 				if (d[curr_generator] == 1) {
 					stat[level + 1].defects++;
 				}
@@ -144,6 +142,8 @@ void new1 (int level) {
 				if (stat[level + 1].defects > max_defects) {
 					continue;
 				}
+				if (d[curr_generator + 1] < 3) // '<3' for 0 defects, '==1' for full search
+					continue;
 			}
 			stat[level+1].stack = d[curr_generator + 1];
 			d[curr_generator + 1] = 0;
@@ -151,15 +151,7 @@ void new1 (int level) {
 			d[curr_generator + 2]++;
 			set(curr_generator);
 			level++;
-//			stat[level].rearrangement = direct > 0 ? 1 : 2;
-			if (direct > 0) {
-				if (curr_generator % 2)
-					stat[level].rearrangement = 1;
-				else
-					stat[level].rearrangement = 0;
-			}
-			else
-			    stat[level].rearrangement = 2;
+			stat[level].rearrangement = direct > 0 ? 1 : 2;
 			stat[level].rearr_index = -1;
 		}
 		else {
