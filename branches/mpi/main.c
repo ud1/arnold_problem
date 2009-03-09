@@ -527,6 +527,7 @@ void do_worker(int id) {
 
 	// Timer initialization
 	signal(SIGALRM, tmr);
+	signal(SIGUSR1, send_timings_signal);
 
 	for (i = 3; i < plurality; i++ ) {
 		triplets[0][i] = triplets[1][i] = triplets[2][i] = i;
