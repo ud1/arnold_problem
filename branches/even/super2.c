@@ -8,6 +8,7 @@
 #define plurality 3
 #define rearrangement_count 3
 
+time_t time1;
 int n, n_step;
 
 int triplets[rearrangement_count][plurality]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
@@ -54,8 +55,9 @@ int find_parallel_config (int k, int level) {
 	max_s[k] = s;
 	max_defects1 = ((n*(n + 1)/2 - k - 3) - 3*max_s[k])/2;
 
+	time1 = time(NULL);
 	if (strcmp(filename, "") == 0) {
-		printf("%s:\nA(%d, %d) = %d; %d %d)", ctime(time(NULL)), n, k, s, max_defects, max_defects1);
+		printf("%s:\nA(%d, %d) = %d; %d %d)", ctime(&time1), n, k, s, max_defects, max_defects1);
 		for (i = 1; i <= level; i++) {
 			printf(" %d", stat[i].generator);
 		}
@@ -73,7 +75,7 @@ int find_parallel_config (int k, int level) {
 	else {
 		f = fopen(filename, "a");
 
-		fprintf(f, "A(%d, %d) = %d; %d %d)", n, k, s, max_defects, max_defects1);
+		fprintf(f, "%s:\nA(%d, %d) = %d; %d %d)", ctime(&time1), n, k, s, max_defects, max_defects1);
 		for (i=1; i <= level; i++) {
 			fprintf(f, " %d", stat[i].generator);
 		}
@@ -200,7 +202,8 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	printf("---------->>>Process started at %s.\n", ctime(time(NULL)));
+	time1 = time(NULL);
+	printf("---------->>>Process started at %s.\n", ctime(&time1));
 
 	max_defects = n_step = n*(n-1) / 2;
 
@@ -230,7 +233,8 @@ int main(int argc, char **argv) {
 
 	new1(0);
 
-	printf("---------->>>Process terminated at %s.\n", ctime(time(NULL)));
+	time1 = time(NULL);
+	printf("---------->>>Process terminated at %s.\n", ctime(&time1));
 	for (i = n/2 + 1; i--; )
 		printf("A(%d, %d) = %d;\n", n, i, max_s[i]);
 	return 0;
