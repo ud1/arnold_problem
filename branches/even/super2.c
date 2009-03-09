@@ -147,7 +147,7 @@ void new1 (int level) {
 			d[curr_generator + 1] = 0;
 			d[curr_generator]++;
 			d[curr_generator + 2]++;
-			set(curr_generator, 1);
+			set(curr_generator);
 			level++;
 //			stat[level].rearrangement = direct > 0 ? 1 : 2;
 			if (direct > 0) {
@@ -163,7 +163,7 @@ void new1 (int level) {
 		else {
 			curr_generator = stat[level].generator;
 			level--;
-			set(curr_generator, 0);
+			set(curr_generator);
 			d[curr_generator]--;
 			d[curr_generator + 2]--;
 			d[curr_generator + 1] = stat[level+1].stack;
