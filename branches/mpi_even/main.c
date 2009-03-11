@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
+#include <time.h>
 
 #define max(a,b) ((a) > (b) ? (a) : (b))
 #define min(a,b) ((a) < (b) ? (a) : (b))
@@ -15,6 +16,7 @@
 #define TQ 5
 #define TAG 0
 
+time_t time1;
 int n, n_step;
 
 int triplets[rearrangement_count][plurality]; //= {{1, 2, -1}, {2, -1, 1}, {-1, 2, 1}};
@@ -31,7 +33,6 @@ int a[n1], d[n1 + 1];
 
 int max_s[n1/2 + 1];
 
-int b_free;
 int max_defects;
 
 // User input
@@ -135,29 +136,32 @@ void tmr (int s) {
 	was_alarm = 1;
 }
 
-void find_parallel_config (int k, int level) {
+// 1 if this is a real configuration.
+// 0 if generators in brackets do not commute.
+int find_parallel_config (int k, int level) {
 	int s, i, max_defects1;
 	FILE *f;
 
 	for (i = 0; i < n; i++)
 		if (a[i] + i < n-2 || a[i] + i > n)
-			return;
+			return 0;
 
 	s = - 1 + (n & 1);
-	for (i = 1; i <= level + 1; i++) {
+	for (i = 1; i <= level; i++) {
 		s -= (stats[i].generator & 1)*2 - 1;
 	}
 	if (s < 0)
 		s = -s;
 	if (s < max_s[k] || !full && s == max_s[k])
-		return;
+		return 1;
 
 	max_s[k] = s;
-	max_defects1 = ((n*(n+1)/2 - k - 3) - 3*max_s[k])/2;
+	max_defects1 = ((n*(n + 1)/2 - k - 3) - 3*max_s[k])/2;
 
+	time1 = time(NULL);
 	if (strcmp(filename, "") == 0) {
-		printf("%s A(%d, %d) = %d; %d %d)", NODE_NAME, n, k, s, max_defects, max_defects1);
-		for (i=1; i <= level+1; i++) {
+		printf("%s (%s) A(%d, %d) = %d; %d %d)", NODE_NAME, ctime(&time1), n, k, s, max_defects, max_defects1);
+		for (i=1; i <= level; i++) {
 			printf(" %d", stats[i].generator);
 		}
 
@@ -174,8 +178,8 @@ void find_parallel_config (int k, int level) {
 	else {
 		f = fopen(filename, "a");
 
-		fprintf(f, "A(%d, %d) = %d; %d %d)", n, k, s, max_defects, max_defects1);
-		for (i=1; i <= level+1; i++) {
+		fprintf(f, "%s:A(%d, %d) = %d; %d %d)", ctime(&time1), n, k, s, max_defects, max_defects1);
+		for (i=1; i <= level; i++) {
 			fprintf(f, " %d", stats[i].generator);
 		}
 
@@ -185,19 +189,20 @@ void find_parallel_config (int k, int level) {
 				fprintf(f, "A(%d, %d) = %d;\n", n, i, max_s[i]);
 		fclose(f);
 	}
+
+	return 1;
 }
 
-inline void set (int curr_generator, int t) {
+inline void set (int curr_generator) {
 	int i;
 
-	b_free += -2*t+1;
 	i = a[curr_generator];
 	a[curr_generator] = a[curr_generator + 1];
 	a[curr_generator + 1] = i;
 }
 
 void run(int level, int min_level) {
-	int curr_generator, direct, i;
+	int curr_generator, direct, i, flag;
 	Message message;
 
 	max_defects = max_defects_default;
@@ -243,19 +248,20 @@ void run(int level, int min_level) {
 				continue;
 			stats[level + 1].generator = curr_generator;
 			stats[level + 1].processed++;
-			if (b_free <= n/2) {
-				set(curr_generator, 1);
-				find_parallel_config(b_free + 1, level);
-				set(curr_generator, 0);
+			if (n_step - 1 - level <= n/2 && (curr_generator % 2)) {
+				set(curr_generator);
+				flag = find_parallel_config(n_step - level - 1, level + 1);
+				set(curr_generator);
+				if (flag) {
+					continue;
+				}
 			}
-			if (!b_free) {
+			if (!(n_step - 1 - level)) {
 				//count_gen(level);
 				continue;
 			}
 			stats[level + 1].defects = stats[level].defects;
 			if (!(curr_generator % 2)/* && (b_free*2 > n)*/) { // even, white
-				if (d[curr_generator + 1] < 3) // '<3' for 0 defects, '==1' for full search
-					continue;
 				if (d[curr_generator] == 1) {
 					stats[level + 1].defects++;
 				}
@@ -265,12 +271,14 @@ void run(int level, int min_level) {
 				if (stats[level + 1].defects > max_defects) {
 					continue;
 				}
+				if (d[curr_generator + 1] < 3) // '<3' for 0 defects, '==1' for full search
+					continue;
 			}
 			stats[level + 1].stack = d[curr_generator + 1];
 			d[curr_generator + 1] = 0;
 			d[curr_generator]++;
 			d[curr_generator + 2]++;
-			set(curr_generator, 1);
+			set(curr_generator);
 			level++;
 			stats[level].rearrangement = direct > 0 ? 1 : 2;
 			stats[level].rearr_index = -1;
@@ -308,7 +316,7 @@ void run(int level, int min_level) {
 		else {
 			curr_generator = stats[level].generator;
 			level--;
-			set(curr_generator, 0);
+			set(curr_generator);
 			d[curr_generator]--;
 			d[curr_generator + 2]--;
 			d[curr_generator + 1] = stats[level + 1].stack;
@@ -505,6 +513,9 @@ int main(int argc, char **argv) {
 	MPI_Comm_size(MPI_COMM_WORLD,&numprocs);
 	MPI_Comm_rank(MPI_COMM_WORLD,&myid);
 
+	time1 = time(NULL);
+	printf("---------->>>Process started at %s.\n", ctime(&time1));
+
 	if(myid == 0) {
 		strcpy(NODE_NAME, "Dispatcher:");
 		do_dispatcher(numprocs);
@@ -514,7 +525,8 @@ int main(int argc, char **argv) {
 		do_worker(myid);
 	}
 
-	printf("---------->>>%s terminated.\n", NODE_NAME);
+	time1 = time(NULL);
+	printf("---------->>>%s terminated at %s.\n", NODE_NAME, ctime(&time1));
 	MPI_Finalize();
 	return 0;
 }
