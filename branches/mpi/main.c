@@ -224,6 +224,23 @@ inline void set (int curr_generator, int t) {
 	a[curr_generator + 1] = i;
 }
 
+void send_message_to_dispatcher(Message &msg) {
+	struct timeval t1, t2;
+	int send_time;
+
+	msg->w_idle_time = timings.w_idle_time;
+	msg->w_run_time = timings.w_run_time;
+	msg->network_time = timings.network_time;
+
+	gettimeofday(&t1, NULL);
+	MPI_Send((void *)msg, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
+	gettimeofday(&t2, NULL);
+
+	send_time =  (t2.tv_sec - t1.tv_sec)*1000 + (t2.tv_usec - t1.tv_usec)/1000;
+	timings.w_idle_time += send_time;
+	timings.network_time += send_time;
+}
+
 void run(int level, int min_level) {
 	int curr_generator, direct, i;
 	Message message;
@@ -327,7 +344,7 @@ void run(int level, int min_level) {
 					message.max_s[i] = max_s[i];
 				}
 
-				MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
+				send_message_to_dispatcher(&message);
 
 				for (i = 0; i <= n_step; ++i)
 					stats[i].processed = 1;
@@ -372,13 +389,16 @@ void print_timings() {
 		timings.network_time);
 }
 
-void copy_from_message(worker_info *inf, const Message *msg) {
-	memcpy(inf->rearrangement, msg->rearrangement, sizeof(msg->rearrangement));
-	memcpy(inf->rearr_index, msg->rearr_index, sizeof(msg->rearr_index));
+void copy_timings_from_message(worker_info *inf, const Message *msg) {
 	inf->w_idle_time = msg->w_idle_time;
 	inf->w_run_time = msg->w_run_time;
 	inf->network_time = msg->network_time;
 	gettimeofday(&inf->t, NULL);
+}
+
+void copy_gens_from_message(worker_info *inf, const Message *msg) {
+	memcpy(inf->rearrangement, msg->rearrangement, sizeof(msg->rearrangement));
+	memcpy(inf->rearr_index, msg->rearr_index, sizeof(msg->rearr_index));
 }	
 
 void do_dispatcher(int numprocs) {
@@ -449,11 +469,12 @@ void do_dispatcher(int numprocs) {
 			message.max_s[i] = max_s[i] = max(message.max_s[i], max_s[i]);
 		}
 
+		copy_timings_from_message(&workers_info[status.MPI_SOURCE-1], &message);
 		switch (message.status) {
 			case FORKED:
 				printf("%s Have a message, level = %d\n", NODE_NAME, message.level);
 
-				copy_from_message(&workers_info[status.MPI_SOURCE-1], &message);
+				copy_gens_from_message(&workers_info[status.MPI_SOURCE-1], &message);
 				workers_info[status.MPI_SOURCE-1].level = message.w_level;
 				workers_info[status.MPI_SOURCE-1].min_level = message.level;
 
@@ -466,7 +487,7 @@ void do_dispatcher(int numprocs) {
 					message.d_search_time = (t1.tv_sec - workers_info[worker].t.tv_sec)*1000 + (t1.tv_usec - workers_info[worker].t.tv_usec)/1000;
 					MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, worker, TAG, MPI_COMM_WORLD);
 
-					copy_from_message(&workers_info[worker-1], &message);
+					copy_gens_from_message(&workers_info[worker-1], &message);
 					workers_info[worker-1].level = message.level;
 					workers_info[worker-1].min_level = message.min_level;
 				}
@@ -486,13 +507,14 @@ void do_dispatcher(int numprocs) {
 				break;
 			case FINISHED:
 				printf("%s Have 'finished' message from %d\n", NODE_NAME, status.MPI_SOURCE);
+
 				if (msg = pop_msg()) {
 					printf("%s Sending a peace of work to the node %d, pop from stack\n", NODE_NAME, status.MPI_SOURCE);
 					gettimeofday(&t1, NULL);
 					message.d_search_time = (t1.tv_sec - t3.tv_sec)*1000 + (t1.tv_usec - t3.tv_usec)/1000;
 					MPI_Send((void *)msg, sizeof(Message)/sizeof(int), MPI_INT, status.MPI_SOURCE, TAG, MPI_COMM_WORLD);
 
-					copy_from_message(&workers_info[status.MPI_SOURCE-1], msg);
+					copy_gens_from_message(&workers_info[status.MPI_SOURCE-1], msg);
 					workers_info[status.MPI_SOURCE-1].level = msg->level;
 					workers_info[status.MPI_SOURCE-1].min_level = msg->min_level;
 
@@ -500,7 +522,6 @@ void do_dispatcher(int numprocs) {
 				}
 				else {
 					set_wrk_state(status.MPI_SOURCE, FINISHED);
-					gettimeofday(&workers_info[status.MPI_SOURCE-1].t, NULL);
 					worker = get_worker(BUSY);
 					if (worker == -1) {
 						// All workers finished, kill them
@@ -593,10 +614,7 @@ void do_worker(int id) {
 		message.status = FINISHED;
 		printf("%s Finished\n", NODE_NAME);
 
-		message.w_idle_time = timings.w_idle_time;
-		message.w_run_time = timings.w_run_time;
-		message.network_time = timings.network_time;
-		MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 0, TAG, MPI_COMM_WORLD);
+		send_message_to_dispatcher(&message);
 	}
 }
 
