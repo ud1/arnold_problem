@@ -232,7 +232,7 @@ void run(int level, int min_level) {
 		d[curr_generator + 1] = 0;
 		d[curr_generator]++;
 		d[curr_generator + 2]++;
-		set(curr_generator, 1);
+		set(curr_generator);
 	}
 
 	was_alarm = 0;
@@ -451,7 +451,7 @@ void do_worker(int id) {
 			stats[i].rearr_index = message.rearr_index[i];
 		}
 
-		max_defects = n_step = n*(n-1) / 2);
+		max_defects = n_step = n*(n-1) / 2;
 		for (i = 0; i < n; i++) {
 			a[i] = i;
 		}
