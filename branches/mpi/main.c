@@ -374,7 +374,11 @@ typedef struct {
 worker_info *workers_info;
 
 void print_timings() {
-	printf(
+	FILE *f;
+	char filename[64];
+	sprintf(filename, "%d_timings.txt", n);
+	f = fopen(filename, "a");
+	fprintf(f,
 		"w_run_time = %dm\n"
 		"w_idle_time = %dm\n"
 		"d_push_msg_time = %du, count = %d, avg = %du\n"
