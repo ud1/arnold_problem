@@ -451,7 +451,7 @@ void do_worker(int id) {
 			stats[i].rearr_index = message.rearr_index[i];
 		}
 
-		b_free = (max_defects = n_step = n*(n-1) / 2) - 1;
+		max_defects = n_step = n*(n-1) / 2);
 		for (i = 0; i < n; i++) {
 			a[i] = i;
 		}
