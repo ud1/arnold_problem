@@ -420,8 +420,11 @@ void do_dispatcher(int numprocs) {
 	// Workers state initializing
 	wrk_init(numprocs-1);
 	workers_info = (worker_info *) malloc((wrk_count)*sizeof(worker_info));
-	for (i = 0; i < wrk_count; ++i)
+
+	for (i = 0; i < wrk_count; ++i) {
 		memset((void *) &workers_info[i], 0, sizeof(worker_info));
+		gettimeofday(&workers_info[i].t, NULL);
+	}
 
 	// Sending first peace of work (root) to the first worker
 	message.level = 0;
