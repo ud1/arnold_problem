@@ -224,7 +224,7 @@ inline void set (int curr_generator, int t) {
 	a[curr_generator + 1] = i;
 }
 
-void send_message_to_dispatcher(Message &msg) {
+void send_message_to_dispatcher(Message *msg) {
 	struct timeval t1, t2;
 	int send_time;
 
