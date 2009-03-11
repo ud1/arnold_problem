@@ -113,7 +113,7 @@ void msg_sort() {
 }
 
 void push_msg_back(Message *msg) {
-	++push_count;
+	++timings.push_count;
 	if (++msg_count > msg_reserve)
 		messages = (Message **) realloc(messages, (msg_reserve *= 2)*sizeof(Message *));
 	messages[msg_count - 1] = msg;
@@ -530,6 +530,7 @@ void do_worker(int id) {
 
 	// Timer initialization
 	signal(SIGALRM, tmr);
+	signal(SIGUSR1, send_timings_signal);
 
 	for (i = 3; i < plurality; i++ ) {
 		triplets[0][i] = triplets[1][i] = triplets[2][i] = i;
