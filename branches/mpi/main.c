@@ -487,7 +487,7 @@ void do_dispatcher(int numprocs) {
 					message.status = BUSY;
 					printf("%s Sending a peace of work to the node %d\n", NODE_NAME, worker);
 					gettimeofday(&t1, NULL);
-					message.d_search_time = (t1.tv_sec - workers_info[worker].t.tv_sec)*1000 + (t1.tv_usec - workers_info[worker].t.tv_usec)/1000;
+					message.d_search_time = (t1.tv_sec - workers_info[worker-1].t.tv_sec)*1000 + (t1.tv_usec - workers_info[worker-1].t.tv_usec)/1000;
 					MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, worker, TAG, MPI_COMM_WORLD);
 
 					copy_gens_from_message(&workers_info[worker-1], &message);
