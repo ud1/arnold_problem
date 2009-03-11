@@ -391,6 +391,7 @@ void print_timings() {
 		timings.d_run_time,
 		timings.d_idle_time,
 		timings.network_time);
+	fclose(f);
 }
 
 void copy_timings_from_message(worker_info *inf, const Message *msg) {
