@@ -429,20 +429,20 @@ void dump_queue() {
 		if (wrk_state[i] == BUSY) {
 			printf("%d %d\n", workers_info[i].min_level, workers_info[i].level);
 			for (j = 0; j <= workers_info[i].level; ++j)
-				printf("%d ", workers_info[i].rearrangement[j];
+				printf("%d ", workers_info[i].rearrangement[j]);
 			printf("\n");
 			for (j = 0; j <= workers_info[i].level; ++j)
-				printf("%d ", workers_info[i].rearr_index[j];
+				printf("%d ", workers_info[i].rearr_index[j]);
 			printf("\n");
 		}
 	}
 	for (i = 0; i < msg_count; ++i) {
 		printf("%d %d\n", messages[i]->min_level, messages[i]->level);
 		for (j = 0; j <= messages[i]->level; ++j)
-			printf("%d ", messages[i]->rearrangement[j];
+			printf("%d ", messages[i]->rearrangement[j]);
 		printf("\n");
 		for (j = 0; j <= messages[i]->level; ++j)
-			printf("%d ", messages[i]->rearr_index[j];
+			printf("%d ", messages[i]->rearr_index[j]);
 		printf("\n");
 	}
 
