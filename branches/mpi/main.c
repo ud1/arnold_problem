@@ -14,6 +14,7 @@
 #define rearrangement_count 3
 
 #define TQ 5
+#define TDUMP 600
 #define TAG 0
 
 int n, n_step;
@@ -379,12 +380,12 @@ void print_timings() {
 	sprintf(filename, "%d_timings.txt", n);
 	f = fopen(filename, "a");
 	fprintf(f,
-		"w_run_time = %dm\n"
-		"w_idle_time = %dm\n"
+		"w_run_time = %dms\n"
+		"w_idle_time = %dms\n"
 		"d_push_msg_time = %du, count = %d, avg = %du\n"
-		"d_run_time = %dm\n"
-		"d_idle_time = %dm\n"
-		"network_time = %dm\n",
+		"d_run_time = %dms\n"
+		"d_idle_time = %dms\n"
+		"network_time = %dms\n",
 		timings.w_run_time,
 		timings.w_idle_time,
 		timings.d_push_msg_time, timings.push_count, timings.d_push_msg_time/timings.push_count,
@@ -404,7 +405,46 @@ void copy_timings_from_message(worker_info *inf, const Message *msg) {
 void copy_gens_from_message(worker_info *inf, const Message *msg) {
 	memcpy(inf->rearrangement, msg->rearrangement, sizeof(msg->rearrangement));
 	memcpy(inf->rearr_index, msg->rearr_index, sizeof(msg->rearr_index));
-}	
+}
+
+void dump_queue() {
+	static int v = 1, i, j;
+	char filename[256];
+	FILE *f;
+	v = !v;
+
+	sprintf(filename, "%d_dump_gens_%d", n, v);
+	f = fopen(filename, "w+");
+	fprintf(f, "// n\n%d\n", n);
+	fprintf(f, "// max_s\n");
+	for (i = 0; i < n/2 + 1; i++ ) {
+		printf("%d ", max_s[i]);
+	}
+	printf("\n");
+	printf("// min_lev, lev, rearrangement, rearr_index ...\n");
+	for (i = 0; i < wrk_count; ++i) {
+		if (wrk_state[i] == BUSY) {
+			printf("%d %d\n", workers_info[i].min_level, workers_info[i].level);
+			for (j = 0; j <= workers_info[i].level; ++j)
+				printf("%d ", workers_info[i].rearrangement[j];
+			printf("\n");
+			for (j = 0; j <= workers_info[i].level; ++j)
+				printf("%d ", workers_info[i].rearr_index[j];
+			printf("\n");
+		}
+	}
+	for (i = 0; i < msg_count; ++i) {
+		printf("%d %d\n", messages[i]->min_level, messages[i]->level);
+		for (j = 0; j <= messages[i]->level; ++j)
+			printf("%d ", messages[i]->rearrangement[j];
+		printf("\n");
+		for (j = 0; j <= messages[i]->level; ++j)
+			printf("%d ", messages[i]->rearr_index[j];
+		printf("\n");
+	}
+
+	fclose(f);
+}
 
 void do_dispatcher(int numprocs) {
 	Message message, *msg;
@@ -443,6 +483,7 @@ void do_dispatcher(int numprocs) {
 	set_wrk_state(1, BUSY);
 	MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 1, TAG, MPI_COMM_WORLD);
 
+	alarm(TDUMP);
 	// Main loop
 	gettimeofday(&t3, NULL);
 	for (;;) {
@@ -457,6 +498,13 @@ void do_dispatcher(int numprocs) {
 			}
 
 			print_timings();
+			dump_queue();
+		}
+
+		if (was_alarm) {
+			was_alarm = 0;
+			alarm(TDUMP);
+			dump_queue();
 		}
 
 		printf("%s Waiting for a message\n", NODE_NAME);
