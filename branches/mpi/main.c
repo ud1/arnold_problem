@@ -510,8 +510,6 @@ void send_work(int node, Message *msg) {
 	copy_gens_from_message(&workers_info[node-1], msg);
 	workers_info[node-1].level = msg->level;
 	workers_info[node-1].min_level = msg->min_level;
-
-	free(msg);
 }
 
 void do_dispatcher(int numprocs, const char *dump_filename) {
@@ -557,6 +555,7 @@ void do_dispatcher(int numprocs, const char *dump_filename) {
 			if (msg = pop_msg()) {
 				trace("%s Sending a peace of work to the node %d, pop from stack\n", NODE_NAME, worker);
 				send_work(worker, msg);
+				free(msg);
 				set_wrk_state(worker, BUSY);
 			} else break;
 		}
@@ -645,6 +644,7 @@ void do_dispatcher(int numprocs, const char *dump_filename) {
 					gettimeofday(&t1, NULL);
 					message.d_search_time = (t1.tv_sec - t3.tv_sec)*1000 + (t1.tv_usec - t3.tv_usec)/1000;
 					send_work(status.MPI_SOURCE, msg);
+					free(msg);
 				}
 				else {
 					set_wrk_state(status.MPI_SOURCE, FINISHED);
