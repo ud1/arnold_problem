@@ -449,7 +449,7 @@ void dump_queue() {
 	fclose(f);
 }
 
-void load_queue(const char *filename) {
+void load_queue(const char *filename, int is_it_dispatcher) {
 	FILE *f;
 	int l, i, res;
 	Message *msg;
@@ -467,6 +467,8 @@ void load_queue(const char *filename) {
 		switch (l) {
 			case 0:
 				n = atoi(str);
+				if (!is_it_dispatcher)
+					return;
 				l = 1;
 				break;
 			case 1:
@@ -521,6 +523,7 @@ void do_dispatcher(int numprocs, const char *dump_filename) {
 	int timeings_results;
 
 	timings.d_idle_time = timings.d_push_msg_time = timings.d_run_time = 0;
+	signal(SIGALRM, tmr);
 	signal(SIGUSR1, send_timings_signal);
 
 	printf("%s We have %d processes\n", NODE_NAME, numprocs);
@@ -550,7 +553,7 @@ void do_dispatcher(int numprocs, const char *dump_filename) {
 		set_wrk_state(1, BUSY);
 		MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 1, TAG, MPI_COMM_WORLD);
 	} else {
-		load_queue(dump_filename);
+		load_queue(dump_filename, 1);
 		while ((worker = get_worker(FINISHED)) != -1) {
 			if (msg = pop_msg()) {
 				trace("%s Sending a peace of work to the node %d, pop from stack\n", NODE_NAME, worker);
@@ -664,7 +667,7 @@ void do_dispatcher(int numprocs, const char *dump_filename) {
 	}
 }
 
-void do_worker(int id) {
+void do_worker(int id, const char *dump_filename) {
 	Message message;
 	MPI_Status status;
 	int i;
@@ -695,6 +698,10 @@ void do_worker(int id) {
 
 	stats[0].generator = 0;
 	stats[0].defects = 0;
+
+	if (dump_filename[0]) {
+		load_queue(dump_filename, 0);
+	}
 
 	gettimeofday(&t2, NULL);
 	for(;;) {
@@ -802,7 +809,7 @@ int main(int argc, char **argv) {
 	}
 	else {
 		sprintf(NODE_NAME, "Worker %d:", myid);
-		do_worker(myid);
+		do_worker(myid, dump_filename);
 	}
 
 	printf("---------->>>%s terminated.\n", NODE_NAME);
