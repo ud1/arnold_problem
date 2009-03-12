@@ -451,17 +451,17 @@ void dump_queue() {
 
 void load_queue(const char *filename) {
 	FILE *f;
-	int l, i;
+	int l, i, res;
 	Message *msg;
-	char *str = malloc(65536), *ptr;
+	char *str = (char *) malloc(65536), *ptr;
 	l = 0;
-	
+
 	f = fopen(filename, "r");
 	if (!f) {
 		printf("File %s not found, exit\n", filename);
 		exit(0);
 	}
-	while(fscanf(f, "%s", str)) {
+	while(res = fscanf(f, "%[^\n]\n", str), res != -1 && res != 0) {
 		if (str[0] == '/')
 			continue;
 		switch (l) {
@@ -475,16 +475,19 @@ void load_queue(const char *filename) {
 					max_s[i] = strtol(ptr, &ptr, 10);
 				}
 				l = 2;
+				break;
 			case 2:
 				msg = (Message *) malloc(sizeof(Message));
-				sscanf(str, "%d %d", msg->min_level, msg->level);
+				sscanf(str, "%d %d", &msg->min_level, &msg->level);
 				l = 3;
+				break;
 			case 3:
 				ptr = str;
 				for (i = 0; i <= msg->level; i++ ) {
 					msg->rearrangement[i] = strtol(ptr, &ptr, 10);
 				}
 				l = 4;
+				break;
 			case 4:
 				ptr = str;
 				for (i = 0; i <= msg->level; i++ ) {
@@ -493,6 +496,7 @@ void load_queue(const char *filename) {
 				memcpy((void *) msg->max_s, (void *) max_s, sizeof(max_s));
 				push_msg_back(msg);
 				l = 2;
+				break;
 		}
 	}
 	fclose(f);
