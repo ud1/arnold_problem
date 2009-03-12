@@ -446,7 +446,57 @@ void dump_queue() {
 	fclose(f);
 }
 
-void do_dispatcher(int numprocs) {
+void load_queue(const char *filename) {
+	FILE *f;
+	int l, i;
+	Message *msg;
+	char *str = malloc(65536), *ptr;
+	l = 0;
+	
+	f = fopen(filename, "r");
+	if (!f) {
+		printf("File %s not found, exit\n", filename);
+		exit(0);
+	}
+	while(fscanf(f, "%s", str)) {
+		if (str[0] == '/')
+			continue;
+		switch (l) {
+			case 0:
+				n = atoi(str);
+				l = 1;
+				break;
+			case 1:
+				ptr = str;
+				for (i = 0; i < n/2 + 1; i++ ) {
+					max_s[i] = strtol(ptr, &ptr, 10);
+				}
+				l = 2;
+			case 2:
+				msg = (Message *) malloc(sizeof(Message));
+				sscanf(str, "%d %d", msg->min_level, msg->level);
+				l = 3;
+			case 3:
+				ptr = str;
+				for (i = 0; i <= msg->level; i++ ) {
+					msg->rearrangement[i] = strtol(ptr, &ptr, 10);
+				}
+				l = 4;
+			case 4:
+				ptr = str;
+				for (i = 0; i <= msg->level; i++ ) {
+					msg->rearr_index[i] = strtol(ptr, &ptr, 10);
+				}
+				memcpy((void *) msg->max_s, (void *) max_s, sizeof(max_s));
+				push_msg_back(msg);
+				l = 2;
+		}
+	}
+	fclose(f);
+	free(str);
+}
+
+void do_dispatcher(int numprocs, const char *dump_filename) {
 	Message message, *msg;
 	MPI_Status status;
 	int worker, i;
@@ -471,19 +521,25 @@ void do_dispatcher(int numprocs) {
 		gettimeofday(&workers_info[i].t, NULL);
 	}
 
-	// Sending first peace of work (root) to the first worker
-	message.level = 0;
-	message.min_level = 0;
-	message.status = BUSY;
-	message.rearrangement[0] = 0;
-	workers_info[0].rearr_index[0] = message.rearr_index[0] = -1;
-
 	for (i = 0; i < n/2 + 1; i++ )
 		message.max_s[i] = max_s[i] = 0;
-	set_wrk_state(1, BUSY);
-	MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 1, TAG, MPI_COMM_WORLD);
+
+	if (!dump_filename[0]) {
+		// Sending first peace of work (root) to the first worker
+		message.level = 0;
+		message.min_level = 0;
+		message.status = BUSY;
+		message.rearrangement[0] = 0;
+		workers_info[0].rearr_index[0] = message.rearr_index[0] = -1;
+
+		set_wrk_state(1, BUSY);
+		MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 1, TAG, MPI_COMM_WORLD);
+	} else {
+		load_queue(dump_filename);
+	}
 
 	alarm(TDUMP);
+
 	// Main loop
 	gettimeofday(&t3, NULL);
 	for (;;) {
@@ -676,21 +732,24 @@ void do_worker(int id) {
 
 int main(int argc, char **argv) {
 	int i;
-	char s[80];
+	char s[80], dump_filename[80];
 	int numprocs;
 	int myid;
 	MPI_Status mpi_stat; 
 
 	if (argc < 2) {
 		printf(
-			"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat]\n"
+			"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat] [-d dump_filename]\n"
 			"-n             line count;\n"
 			"-max-def       the number of allowed defects;\n"
 			"-full          output all found generator sets;\n"
 			"-stat          show stat after every generator set;\n"
+			"-d             dump file name\n"
 			"-o             output file.\n", argv[0]);
 		return 0;
 	}
+
+	dump_filename[0] = '\0';
 
 	for (i = 1; i < argc; i++) {
 		strcpy(s, argv[i]);
@@ -704,6 +763,8 @@ int main(int argc, char **argv) {
 			full = 1;
 		else if (!strcmp("-stat", s))
 			show_stat = 1;
+		else if (!strcmp("-d", s))
+			strcpy(dump_filename, argv[i]);
 		else {		
 			printf(
 				"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat]\n"
@@ -722,7 +783,7 @@ int main(int argc, char **argv) {
 
 	if(myid == 0) {
 		strcpy(NODE_NAME, "Dispatcher:");
-		do_dispatcher(numprocs);
+		do_dispatcher(numprocs, dump_filename);
 	}
 	else {
 		sprintf(NODE_NAME, "Worker %d:", myid);
