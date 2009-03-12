@@ -432,7 +432,7 @@ void dump_queue() {
 				fprintf(f, "%d ", workers_info[i].rearrangement[j]);
 			fprintf(f, "\n");
 			for (j = 0; j <= workers_info[i].level; ++j)
-				fprintff, ("%d ", workers_info[i].rearr_index[j]);
+				fprintf(f, "%d ", workers_info[i].rearr_index[j]);
 			fprintf(f, "\n");
 		}
 	}
