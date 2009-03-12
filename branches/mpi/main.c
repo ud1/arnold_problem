@@ -772,6 +772,7 @@ int main(int argc, char **argv) {
 				"-max-def       the number of allowed defects;\n"
 				"-full          output all found generator sets;\n"
 				"-stat          show stat after every generator set;\n"
+				"-d             dump file name\n"
 				"-o             output file.\n", argv[0]);
 			return 0;
 		}
