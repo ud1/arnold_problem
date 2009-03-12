@@ -767,7 +767,7 @@ int main(int argc, char **argv) {
 		else if (!strcmp("-stat", s))
 			show_stat = 1;
 		else if (!strcmp("-d", s))
-			strcpy(dump_filename, argv[i]);
+			strcpy(dump_filename, argv[++i]);
 		else {		
 			printf(
 				"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat]\n"
