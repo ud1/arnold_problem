@@ -611,7 +611,7 @@ void do_dispatcher(int numprocs, const char *dump_filename) {
 					gettimeofday(&t1, NULL);
 					msg = (Message *) malloc(sizeof(Message));
 					if (msg == NULL) {
-						trace ("Panic! Not enough memory!\n");
+						printf ("Panic! Not enough memory!\n");
 					}
 					memcpy((void *) msg, (void *) &message, sizeof(Message));
 					push_msg_back(msg);
