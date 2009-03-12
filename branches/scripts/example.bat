@@ -1,0 +1,5 @@
+SET VERBOSE=1
+SET ADDITIONAL_GENS="1 3 5 7 9 11 13 15 17 19"
+SET CONF_FILE=cluster_21_10.txt
+lua5.1.exe -l lines
+PAUSE
