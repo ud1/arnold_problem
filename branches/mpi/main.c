@@ -531,6 +531,8 @@ void do_dispatcher(int numprocs, const char *dump_filename) {
 	for (i = 0; i < n/2 + 1; i++ )
 		message.max_s[i] = max_s[i] = 0;
 
+	set_wrk_state(1, BUSY);
+	
 	if (!dump_filename[0]) {
 		// Sending first peace of work (root) to the first worker
 		message.level = 0;
@@ -538,11 +540,20 @@ void do_dispatcher(int numprocs, const char *dump_filename) {
 		message.status = BUSY;
 		message.rearrangement[0] = 0;
 		workers_info[0].rearr_index[0] = message.rearr_index[0] = -1;
-
-		set_wrk_state(1, BUSY);
 		MPI_Send((void *)&message, sizeof(Message)/sizeof(int), MPI_INT, 1, TAG, MPI_COMM_WORLD);
+
 	} else {
 		load_queue(dump_filename);
+		if (msg = pop_msg()) {
+			trace("%s Sending a peace of work to the node %d, pop from stack\n", NODE_NAME, status.MPI_SOURCE);
+			MPI_Send((void *)msg, sizeof(Message)/sizeof(int), MPI_INT, 1, TAG, MPI_COMM_WORLD);
+
+			copy_gens_from_message(&workers_info[status.MPI_SOURCE-1], msg);
+			workers_info[status.MPI_SOURCE-1].level = msg->level;
+			workers_info[status.MPI_SOURCE-1].min_level = msg->min_level;
+
+			free(msg);
+		}
 	}
 
 	alarm(TDUMP);
