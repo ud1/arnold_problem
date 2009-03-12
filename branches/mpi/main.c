@@ -421,7 +421,7 @@ void dump_queue() {
 	fprintf(f, "// n\n%d\n", n);
 	fprintf(f, "// max_s\n");
 	for (i = 0; i < n/2 + 1; i++ ) {
-		printf("%d ", max_s[i]);
+		fprintf(f, "%d ", max_s[i]);
 	}
 	fprintf(f, "\n");
 	fprintf(f, "// min_lev, lev, rearrangement, rearr_index ...\n");
