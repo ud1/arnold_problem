@@ -423,27 +423,27 @@ void dump_queue() {
 	for (i = 0; i < n/2 + 1; i++ ) {
 		printf("%d ", max_s[i]);
 	}
-	printf("\n");
-	printf("// min_lev, lev, rearrangement, rearr_index ...\n");
+	fprintf(f, "\n");
+	fprintf(f, "// min_lev, lev, rearrangement, rearr_index ...\n");
 	for (i = 0; i < wrk_count; ++i) {
 		if (wrk_state[i] == BUSY) {
-			printf("%d %d\n", workers_info[i].min_level, workers_info[i].level);
+			fprintf(f, "%d %d\n", workers_info[i].min_level, workers_info[i].level);
 			for (j = 0; j <= workers_info[i].level; ++j)
-				printf("%d ", workers_info[i].rearrangement[j]);
-			printf("\n");
+				fprintf(f, "%d ", workers_info[i].rearrangement[j]);
+			fprintf(f, "\n");
 			for (j = 0; j <= workers_info[i].level; ++j)
-				printf("%d ", workers_info[i].rearr_index[j]);
-			printf("\n");
+				fprintff, ("%d ", workers_info[i].rearr_index[j]);
+			fprintf(f, "\n");
 		}
 	}
 	for (i = 0; i < msg_count; ++i) {
-		printf("%d %d\n", messages[i]->min_level, messages[i]->level);
+		fprintf(f, "%d %d\n", messages[i]->min_level, messages[i]->level);
 		for (j = 0; j <= messages[i]->level; ++j)
-			printf("%d ", messages[i]->rearrangement[j]);
-		printf("\n");
+			fprintf(f, "%d ", messages[i]->rearrangement[j]);
+		fprintf(f, "\n");
 		for (j = 0; j <= messages[i]->level; ++j)
-			printf("%d ", messages[i]->rearr_index[j]);
-		printf("\n");
+			fprintf(f, "%d ", messages[i]->rearr_index[j]);
+		fprintf(f, "\n");
 	}
 
 	fclose(f);
