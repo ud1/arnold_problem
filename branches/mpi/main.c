@@ -340,7 +340,7 @@ void run(int level, int min_level) {
 				message.status = FORKED;
 
 				trace("%s message.level = %d\n", NODE_NAME, message.level);
-				for (i = 0; i < message.w_level; ++i) {
+				for (i = 0; i <= message.w_level; ++i) {
 					message.rearr_index[i] = stats[i].rearr_index;
 					message.rearrangement[i] = stats[i].rearrangement;
 				}
@@ -428,20 +428,20 @@ void dump_queue() {
 	for (i = 0; i < wrk_count; ++i) {
 		if (wrk_state[i] == BUSY) {
 			fprintf(f, "%d %d\n", workers_info[i].min_level, workers_info[i].level);
-			for (j = 0; j < workers_info[i].level; ++j)
+			for (j = 0; j <= workers_info[i].level; ++j)
 				fprintf(f, "%d ", workers_info[i].rearrangement[j]);
 			fprintf(f, "\n");
-			for (j = 0; j < workers_info[i].level; ++j)
+			for (j = 0; j <= workers_info[i].level; ++j)
 				fprintf(f, "%d ", workers_info[i].rearr_index[j]);
 			fprintf(f, "\n");
 		}
 	}
 	for (i = 0; i < msg_count; ++i) {
 		fprintf(f, "%d %d\n", messages[i]->min_level, messages[i]->level);
-		for (j = 0; j < messages[i]->level; ++j)
+		for (j = 0; j <= messages[i]->level; ++j)
 			fprintf(f, "%d ", messages[i]->rearrangement[j]);
 		fprintf(f, "\n");
-		for (j = 0; j < messages[i]->level; ++j)
+		for (j = 0; j <= messages[i]->level; ++j)
 			fprintf(f, "%d ", messages[i]->rearr_index[j]);
 		fprintf(f, "\n");
 	}
@@ -483,14 +483,14 @@ void load_queue(const char *filename) {
 				break;
 			case 3:
 				ptr = str;
-				for (i = 0; i < msg->level; i++ ) {
+				for (i = 0; i <= msg->level; i++ ) {
 					msg->rearrangement[i] = strtol(ptr, &ptr, 10);
 				}
 				l = 4;
 				break;
 			case 4:
 				ptr = str;
-				for (i = 0; i < msg->level; i++ ) {
+				for (i = 0; i <= msg->level; i++ ) {
 					msg->rearr_index[i] = strtol(ptr, &ptr, 10);
 				}
 				memcpy((void *) msg->max_s, (void *) max_s, sizeof(max_s));
@@ -718,7 +718,7 @@ void do_worker(int id) {
 			max_s[i] = message.max_s[i];
 		}
 
-		for (i = 0; i < message.level; ++i) {
+		for (i = 0; i <= message.level; ++i) {
 			stats[i].rearrangement = message.rearrangement[i];
 			stats[i].rearr_index = message.rearr_index[i];
 		}
