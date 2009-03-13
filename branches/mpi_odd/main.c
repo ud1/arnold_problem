@@ -450,41 +450,41 @@ void load_queue(const char *filename, int is_it_dispatcher) {
 		if (str[0] == '/') 
 			continue; 
 		switch (l) { 
-						case 0: 
-							ptr = str;
-							n = strtol(ptr, &ptr, 10); 
-							k = strtol(ptr, &ptr, 10); 
-							if (!is_it_dispatcher) 
-								return; 
-							l = 1; 
-							break; 
-						case 1: 
-							ptr = str; 
-							max_s = strtol(ptr, &ptr, 10); 
-							l = 2; 
-							break; 
-						case 2: 
-							msg = (Message *) malloc(sizeof(Message)); 
-							sscanf(str, "%d %d", &msg->min_level, &msg->level); 
-							l = 3; 
-							break; 
-						case 3: 
-							ptr = str; 
-							for (i = 0; i <= msg->level; i++ ) { 
-								msg->rearrangement[i] = strtol(ptr, &ptr, 10); 
-							} 
-							l = 4; 
-							break; 
-						case 4: 
-							ptr = str; 
-							for (i = 0; i <= msg->level; i++ ) { 
-								msg->rearr_index[i] = strtol(ptr, &ptr, 10); 
-							} 
-							msg->max_s = max_s;
-							msg->status = BUSY; 
-							push_msg_back(msg); 
-							l = 2; 
-							break; 
+		case 0: 
+			ptr = str;
+			n = strtol(ptr, &ptr, 10); 
+			k = strtol(ptr, &ptr, 10); 
+			if (!is_it_dispatcher) 
+				return; 
+			l = 1; 
+			break; 
+		case 1: 
+			ptr = str; 
+			max_s = strtol(ptr, &ptr, 10); 
+			l = 2; 
+			break; 
+		case 2: 
+			msg = (Message *) malloc(sizeof(Message)); 
+			sscanf(str, "%d %d", &msg->min_level, &msg->level); 
+			l = 3; 
+			break; 
+		case 3: 
+			ptr = str; 
+			for (i = 0; i <= msg->level; i++ ) { 
+				msg->rearrangement[i] = strtol(ptr, &ptr, 10); 
+			} 
+			l = 4; 
+			break; 
+		case 4: 
+			ptr = str; 
+			for (i = 0; i <= msg->level; i++ ) { 
+				msg->rearr_index[i] = strtol(ptr, &ptr, 10); 
+			} 
+			msg->max_s = max_s;
+			msg->status = BUSY; 
+			push_msg_back(msg); 
+			l = 2; 
+			break; 
 		} 
 	} 
 	fclose(f); 
