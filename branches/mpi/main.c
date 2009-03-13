@@ -788,7 +788,7 @@ int main(int argc, char **argv) {
 			strcpy(dump_filename, argv[++i]);
 		else {		
 			printf(
-				"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat]\n"
+				"Usage: %s -n N [-max-def D] [-o filename] [-full] [-stat] [-d dump_filename]\n"
 				"-n             line count;\n"
 				"-max-def       the number of allowed defects;\n"
 				"-full          output all found generator sets;\n"
