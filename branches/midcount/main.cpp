@@ -1,5 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <map>
+
+#define MAXN 100
+
+std::map<int, double> cash;
 
 double v (int n, int l) {
 	int i;
@@ -10,8 +15,12 @@ double v (int n, int l) {
 		}
 		return 0.0;
 	}
+	if (cash.count(n*MAXN + l))
+		return cash[n*MAXN + l];
 	for (i = 0; i < n; ++i)
 		sum += v(n-1, l - i);
+
+	cash[n*MAXN + l] = sum;
 	return sum;
 }
 
