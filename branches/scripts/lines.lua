@@ -3,57 +3,64 @@ dofile"base.lua"
 verbose = os.getenv("VERBOSE")
 additional_gens = os.getenv("ADDITIONAL_GENS")
 filename = os.getenv("CONF_FILE")
-confs = load_confs(filename, additional_gens)
+do_not_extract_tdc = os.getenv("DO_NOT_EXTRACT_TDC")
 
-dists = {}
+if not do_not_extract_tdc then
+	io.input(filename)
+	confs = {}
+	while true do
+		local line = io.read()
+		if line == nil then break end
+		
+		if end_gens then
+			line = line .. " " .. end_gens
+		end
+		local conf = read_conf(line)
+		
 
-dist = {}
-for i, k in ipairs(confs) do
-	dists[i] = get_polygon_num(k)
+		local flag = false
+		for i, k in ipairs(confs) do
+			if k == conf then
+				flag = true
+				break
+			end
+		end
+		
+		if not flag then
+			table.insert(confs, conf)
+			if (verbose) then
+				print("\nconf #", table.getn(confs))
+				conf:print()
+				conf:get_polygon_num():print()
+			else
+				conf:print_gens()
+			end
+		end
+		
+    end
+	
+else
+	confs = load_confs(filename, additional_gens)
 end
 
-dist2 = {}
-dist2.num = {}
-
-for i, k in ipairs(dists) do
-	local flag = false
-	for i1, k1 in ipairs(dist2) do
-		if (k1 == k and get_Omatrix(confs[i]) == get_Omatrix(confs[dist2.num[i1]])
-		) then
-			flag = true
-			break
+if verbose then
+	local confs_num = {}
+	
+	local min_s, max_s
+	min_s = confs[1]:get_s()
+	max_s = min_s
+	
+	for i, k in ipairs(confs) do
+		local s = k:get_s()
+	
+		confs_num[s] = (confs_num[s] or 0) + 1
+		max_s = (max_s > s) and max_s or s
+		min_s = (min_s < s) and min_s or s
+	end
+	
+	for i = min_s, max_s do
+		if confs_num[i] then
+			print(string.format("s = %d, %d", i, confs_num[i]))
 		end
 	end
-	if not flag then
-		table.insert(dist2, k)
-		dist2.num[table.getn(dist2)] = i
-		dist[table.getn(dist2)] = {}
-		if (verbose) then
-			print("\nconf #", table.getn(dist2))
-			print_conf(confs[i])
-			print_polygon_num(k)
-			--print("Omatrix:\n")
-			--print_matrix(get_Omatrix(confs[i]))
-		else
-			print_gens(confs[i])
-		end
-	end
-end
-
-if (verbose) then
-	dists = dist2
-
-	for i1, k1 in ipairs(dists) do
-		for i2, k2 in ipairs(dists) do
-		dist[i1][i2] = distance2(dists[i1], dists[i2])
-		end
-	end
-
-	for i1, k1 in ipairs(dist) do
-		for i2, k2 in ipairs(dist[i1]) do
-			io.write(string.format("%3d ", k2))
-		end
-		io.write("\n");
-	end
-
 end
