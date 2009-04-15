@@ -219,6 +219,14 @@ function read_conf(gens)
 		for i = 0, this:get_N() do
 			put(s.ext, n[i])
 		end
+		
+		for i = 1, s.ext.max_n do
+			s.ext[i] = s.ext[i] or 0
+		end
+		for i = 1, s.int.max_n do
+			s.int[i] = s.int[i] or 0
+		end
+		
 		setmetatable(s, polygon_num_mt)
 		
 		s.print = function(this)
@@ -398,3 +406,44 @@ polygon_num_mt = {
 		return cmp(a.ext, b.ext) and cmp(a.int, b.int)
 	end
 }
+
+function load_bgr(filename)
+	local big_gr = {}
+	local i1, i2
+	io.input(filename)
+	while true do
+		local line = io.read()
+		if line == nil then break end
+		_, _, i1, i2 = string.find(line, "(%d+)%s*(%d+)")
+		i1, i2 = tonumber(i1), tonumber(i2)
+		--print(i1, i2)
+		big_gr[i1] = big_gr[i1] or {}
+		big_gr[i2] = big_gr[i2] or {}
+		table.insert(big_gr[i1], i2)
+		table.insert(big_gr[i2], i1)
+    end
+	return big_gr
+end
+
+function distance(bgr, i1, i2)
+	local potencial = {}
+	local input = {}
+	local output = {}
+	table.insert(input, i1)
+	local l
+	l = 0
+	while table.getn(input) > 0 do
+		l = l + 1
+		for i, k in pairs(input) do
+			for i1, k1 in pairs(bgr[k]) do
+				if not potencial[k1] then
+					table.insert(output, k1)
+					potencial[k1] = l
+					if k1 == i2 then return l end
+				end
+			end
+		end
+		input = output
+		output = {}
+	end
+end
