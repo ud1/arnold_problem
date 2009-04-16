@@ -747,6 +747,10 @@ void do_worker(int id, const char *dump_filename) {
 		message.status = FINISHED;
 		trace("%s Finished\n", NODE_NAME);
 
+		message.w_idle_time = timings.w_idle_time;
+		message.w_run_time = timings.w_run_time;
+		message.network_time = timings.network_time;
+
 		send_message_to_dispatcher(&message);
 	}
 }
