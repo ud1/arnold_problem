@@ -246,6 +246,49 @@ function read_conf(gens)
 		
 		return s
 	end
+	
+	conf.get_polygons = function(this)
+		local is_int = {}
+		local a = {}
+		local p = {}
+		local int_polygons = {}
+		local ext_polygons = {}
+
+		for i = 0, this:get_N() do
+			a[i] = i
+			p[i] = {l1 = i, l2 = i + 1, l = {}, r = {}}
+			is_int[i] = false
+		end
+
+		for i = 1, table.getn(this) do 
+			local gen = gens[i]
+			
+			p[gen].e = i
+			table.insert(p[gen-1].r, i)
+			table.insert(p[gen+1].l, i)
+			
+			if is_int[gen] then
+				table.insert(int_polygons, p[gen])
+			else
+				table.insert(ext_polygons, p[gen])
+			end
+			p[gen] = {b = i, l = {}, r = {}}	
+			
+			a[gen], a[gen + 1] = a[gen + 1], a[gen]
+			is_int[gen] = true
+		end
+
+		a[0] = a[this:get_N()]
+		a[this:get_N() + 1] = this:get_N()
+
+		for i = 0, this:get_N() do
+			p[i].l1 = a[i]
+			p[i].l2 = a[i + 1]
+			table.insert(ext_polygons, p[i])
+		end
+		
+		return {ext_polygons = ext_polygons, int_polygons = int_polygons}
+	end
 
 	setmetatable(conf, configuration_mt)	
 	
@@ -421,7 +464,7 @@ function load_bgr(filename)
 		big_gr[i2] = big_gr[i2] or {}
 		table.insert(big_gr[i1], i2)
 		table.insert(big_gr[i2], i1)
-    end
+	end
 	return big_gr
 end
 
@@ -446,4 +489,25 @@ function distance(bgr, i1, i2)
 		input = output
 		output = {}
 	end
+end
+
+function parse_ini(filename)
+	local res, m, mode, n, val
+	local ini = {}
+	io.input(filename)
+	while true do
+		local line = io.read()
+		if line == nil then break end
+		res, _, m = string.find(line, "^%[(.+)%]$")
+		if res then
+			mode = m
+			ini[mode] = {}
+		else
+			res, _, n, val = string.find(line, "^(.+)=(.+)$")
+			if res then
+				ini[mode][n] = val
+			end
+		end
+	end
+	return ini
 end
