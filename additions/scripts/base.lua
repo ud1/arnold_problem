@@ -61,19 +61,12 @@ function load_confs(filename, end_gens)
 	return confs
 end
 
--- in:		string: generators
--- out:	configuration
-function read_conf(gens)
-	local line = gens
-	--print(line)
+function read_conf_from_table(gens_table)
 	local conf = {}
-	
-	local _, j = string.find(line, ")")
-	if j then line = string.sub(line, j) end
-	
-	for w in string.gfind(line, "(%d+)%s*") do
-		table.insert(conf, tonumber(w)+1)
+	for i = 1, table.getn(gens_table) do
+		conf[i] = gens_table[i]
 	end
+	
 	configurations[conf] = {N = 0, k = 0}
 	max_gen = conf[1]
 	for _, w in ipairs(conf) do
@@ -119,6 +112,26 @@ function read_conf(gens)
 		print("s = ", configurations[this].s)
 	end
 
+	conf.get_Omatrix_indexed = function(this)
+		local matrix = {}
+		local lines = {}
+		local positions = {}
+		for i = 1, this:get_N() do
+			matrix[i] = {}
+			lines[i] = i
+		end
+		for i = 1, table.getn(this) do
+			local gen = this[i]
+			local first = lines[gen]
+			local second = lines[gen+1]
+			
+			table.insert(matrix[first], i)
+			table.insert(matrix[second], i)
+			lines[gen] = second;
+			lines[gen+1] = first;
+		end
+	end
+	
 	conf.get_Omatrix = function(this, recreate)
 		if not recreate and Omatrices[this] then
 			return Omatrices[this]
@@ -256,12 +269,12 @@ function read_conf(gens)
 
 		for i = 0, this:get_N() do
 			a[i] = i
-			p[i] = {l1 = i, l2 = i + 1, l = {}, r = {}}
+			p[i] = {l1 = i, l2 = i + 1, d1 = -1, d2 = -1, l = {}, r = {}}
 			is_int[i] = false
 		end
 
 		for i = 1, table.getn(this) do 
-			local gen = gens[i]
+			local gen = this[i]
 			
 			p[gen].e = i
 			table.insert(p[gen-1].r, i)
@@ -284,6 +297,8 @@ function read_conf(gens)
 		for i = 0, this:get_N() do
 			p[i].l1 = a[i]
 			p[i].l2 = a[i + 1]
+			p[i].d1 = 1
+			p[i].d2 = 1
 			table.insert(ext_polygons, p[i])
 		end
 		
@@ -294,6 +309,20 @@ function read_conf(gens)
 	
 	--print(N, k)
 	return conf
+end
+
+-- in:		string: generators
+-- out:	configuration
+function read_conf(gens)
+	local line = gens
+	local conf = {}
+	local _, j = string.find(line, ")")
+	if j then line = string.sub(line, j) end
+	
+	for w in string.gfind(line, "(%d+)%s*") do
+		table.insert(conf, tonumber(w)+1)
+	end
+	return read_conf_from_table(conf)
 end
 
 configuration_mt = {
