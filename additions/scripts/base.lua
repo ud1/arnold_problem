@@ -130,6 +130,7 @@ function read_conf_from_table(gens_table)
 			lines[gen] = second;
 			lines[gen+1] = first;
 		end
+		return matrix
 	end
 	
 	conf.get_Omatrix = function(this, recreate)
@@ -272,6 +273,9 @@ function read_conf_from_table(gens_table)
 			p[i] = {l1 = i, l2 = i + 1, d1 = -1, d2 = -1, l = {}, r = {}}
 			is_int[i] = false
 		end
+		
+		p[0].c = 0
+		p[this:get_N()].c = this:get_N()
 
 		for i = 1, table.getn(this) do 
 			local gen = this[i]
@@ -297,10 +301,16 @@ function read_conf_from_table(gens_table)
 		for i = 0, this:get_N() do
 			p[i].l1 = a[i]
 			p[i].l2 = a[i + 1]
-			p[i].d1 = 1
-			p[i].d2 = 1
+			if i ~= 0 then
+				p[i].d1 = 1
+			end
+			if i ~= this:get_N() then
+				p[i].d2 = 1
+			end
 			table.insert(ext_polygons, p[i])
 		end
+		
+		
 		
 		return {ext_polygons = ext_polygons, int_polygons = int_polygons}
 	end
@@ -539,4 +549,219 @@ function parse_ini(filename)
 		end
 	end
 	return ini
+end
+
+function init_svg()
+	package.loadlib("lua_svg.dll", "init")()
+	os.setlocale("rus")
+end
+
+
+function convert_arn_to_svg(filename, svg_filename, border_size, color)
+	border_size = border_size or 0.1
+	color = color or 0
+	
+	ini = parse_ini(filename)
+	if not ini.parameters.number_of_generators then return nil end
+	local n_gens = tonumber(ini.parameters.number_of_generators)
+
+	local conf = {}
+	local x = {}
+	local y = {}
+	local xmin, xmax, ymin, ymax
+	xmin = tonumber(ini.points["x0"])
+	xmax = xmin
+	ymin = tonumber(ini.points["y0"])
+	ymax = ymin
+	for i = 1, n_gens do
+		conf[i] = tonumber(ini.points[string.format("g%d", i - 1)]) + 1
+		x[i] = tonumber(ini.points[string.format("x%d", i - 1)])
+		y[i] = tonumber(ini.points[string.format("y%d", i - 1)])
+		
+		xmax = (x[i] > xmax) and x[i] or xmax
+		ymax = (y[i] > ymax) and y[i] or ymax
+		xmin = (x[i] < xmin) and x[i] or xmin
+		ymin = (y[i] < ymin) and y[i] or ymin
+	end
+
+	conf = read_conf_from_table(conf)
+	local polygons = conf:get_polygons()
+
+	svg.set_name(svg_filename)
+	local width = math.floor((xmax - xmin) * (1 + border_size) + 1)
+	local height = math.floor((ymax - ymin) * (1 + border_size) + 1)
+	svg.set_size(width, height)
+	svg.begin_drawing()
+
+	--print(xmin, xmax, ymin, ymax)
+	
+	local offsetx = -xmin + (xmax - xmin) * border_size / 2.0
+	local offsety = -ymin + (ymax - ymin) * border_size / 2.0
+	
+	for i = 1, n_gens do
+		x[i] = x[i] + offsetx
+		y[i] = y[i] + offsety
+	end
+	
+	for i, k in pairs(polygons.int_polygons) do
+		local polygon = {}
+		if (conf[k.b] % 2) == color then
+			table.insert(polygon, x[k.b])
+			table.insert(polygon, y[k.b])
+
+			for i = 1, table.getn(k.r) do
+				table.insert(polygon, x[k.r[i]])
+				table.insert(polygon, y[k.r[i]])
+			end
+			
+			table.insert(polygon, x[k.e])
+			table.insert(polygon, y[k.e])
+			
+			for i = table.getn(k.l), 1, -1 do
+				table.insert(polygon, x[k.l[i]])
+				table.insert(polygon, y[k.l[i]])
+			end
+
+			svg.draw_polygon(polygon)
+		end
+	end
+	
+	-- [[
+	local corner = {{x = 0, y = 0}, {x = 0, y = height}, {x = width, y = height}, {x = width, y = 0}}
+	
+	local Omat = conf:get_Omatrix_indexed()
+	
+	function get_tangent(l, d)
+		local g1 = Omat[l][1]
+		local g2 = Omat[l][table.getn(Omat[l])]
+		return {x = (x[g2] - x[g1]) * d, y = (y[g2] - y[g1]) * d}
+	end
+	
+	function cross(t1, t2)
+		return t1.x*t2.y - t1.y*t2.x
+	end	
+	
+	function sub(t1, t2)
+		--print(t1.x, t1.y, t2.x, t2.y)
+		return {x = t1.x - t2.x, y = t1.y - t2.y}
+	end	
+	
+	function get_lines_intersection(p1, t1, p2, t2)
+		local beta = cross(sub(p1, p2), t1) / cross(t2, t1)
+		return {x = p2.x + t2.x*beta, y = p2.y + t2.y*beta}
+	end
+
+	function get_border_intersection(l, d)
+		local t = get_tangent(l, d)
+		--print("inter", x[Omat[l][1] ], y[Omat[l][1] ], t.x, t.y)	
+		local ln
+		for i = 1, 4 do
+			local t1 = sub(corner[i], {x = x[Omat[l][1] ], y = y[Omat[l][1] ]})
+			local t2 = sub(corner[i % 4 + 1], {x = x[Omat[l][1] ], y = y[Omat[l][1] ]})
+			local a1 = cross(t2, t) / cross(t2, t1)
+			local a2 = cross(t1, t) / cross(t1, t2)
+			if a1 >= 0 and a2 >= 0 then
+				ln = i
+				break
+			end
+		end
+		local res =  get_lines_intersection(
+			{x = x[Omat[l][1] ], y = y[Omat[l][1] ]}, t,
+			corner[ln],
+			sub(corner[ln % 4 + 1], corner[ln])
+		)
+		--print("res", res.x, res.y)
+		return res
+	end
+	
+	for i, k in pairs(polygons.ext_polygons) do
+		local polygon = {}
+		if ((conf[k.b] or conf[k.e] or k.c) % 2) == color then
+			for i = table.getn(k.l), 1, -1 do
+				table.insert(polygon, x[k.l[i] ])
+				table.insert(polygon, y[k.l[i] ])
+				--print("l", x[k.l[i] ], y[k.l[i] ])
+			end
+			
+			if not k.b and k.e then
+				local t = get_border_intersection(k.l1, k.d1)
+				table.insert(polygon, t.x)
+				table.insert(polygon, t.y)
+				--print("l1", t.x, t.y)
+				
+				t = get_border_intersection(k.l2, k.d2)
+				table.insert(polygon, t.x)
+				table.insert(polygon, t.y)
+				--print("l2", t.x, t.y)
+				
+				for i = 1, table.getn(k.r) do
+					table.insert(polygon, x[k.r[i] ])
+					table.insert(polygon, y[k.r[i] ])
+					--print("r", x[k.r[i] ], y[k.r[i] ])
+				end
+				
+				table.insert(polygon, x[k.e])
+				table.insert(polygon, y[k.e])
+				--print("e", x[k.e], y[k.e])
+				
+			elseif k.b and not k.e then
+				table.insert(polygon, x[k.b])
+				table.insert(polygon, y[k.b])
+				--print("b", x[k.b], y[k.b])
+				
+				for i = 1, table.getn(k.r) do
+					table.insert(polygon, x[k.r[i] ])
+					table.insert(polygon, y[k.r[i] ])
+					--print("r", x[k.r[i] ], y[k.r[i] ])
+				end
+				
+				local t = get_border_intersection(k.l2, k.d2)
+				table.insert(polygon, t.x)
+				table.insert(polygon, t.y)
+				--print("l2", t.x, t.y)
+				
+				t = get_border_intersection(k.l1, k.d1)
+				table.insert(polygon, t.x)
+				table.insert(polygon, t.y)
+				--print("l1", t.x, t.y)
+			elseif k.c == 0 then
+				local t = get_border_intersection(k.l1, k.d1)
+				table.insert(polygon, t.x)
+				table.insert(polygon, t.y)
+				--print("l1", t.x, t.y)
+				
+				for i = 1, table.getn(k.r) do
+					table.insert(polygon, x[k.r[i] ])
+					table.insert(polygon, y[k.r[i] ])
+					--print("r", x[k.r[i] ], y[k.r[i] ])
+				end
+				
+				t = get_border_intersection(k.l2, k.d2)
+				table.insert(polygon, t.x)
+				table.insert(polygon, t.y)
+				--print("l2", t.x, t.y)
+			else
+				local t = get_border_intersection(k.l2, k.d2)
+				table.insert(polygon, t.x)
+				table.insert(polygon, t.y)
+				--print("l1", t.x, t.y)
+				
+				for i = 1, table.getn(k.r) do
+					table.insert(polygon, x[k.r[i] ])
+					table.insert(polygon, y[k.r[i] ])
+					--print("r", x[k.r[i] ], y[k.r[i] ])
+				end
+				
+				t = get_border_intersection(k.l1, k.d1)
+				table.insert(polygon, t.x)
+				table.insert(polygon, t.y)
+				--print("l2", t.x, t.y)
+			end
+			svg.draw_polygon(polygon)
+		end
+	end
+	--]]
+	
+	svg.end_drawing()
+
 end
