@@ -270,17 +270,15 @@ function read_conf_from_table(gens_table)
 
 		for i = 0, this:get_N() do
 			a[i] = i
-			p[i] = {l1 = i, l2 = i + 1, d1 = -1, d2 = -1, l = {}, r = {}}
+			p[i] = {l1 = i, l2 = i + 1, d1 = -1, d2 = -1, l = {}, r = {}, c = i}
 			is_int[i] = false
 		end
 		
-		p[0].c = 0
-		p[this:get_N()].c = this:get_N()
-
 		for i = 1, table.getn(this) do 
 			local gen = this[i]
 			
 			p[gen].e = i
+			table.insert(p[gen].l, i)
 			table.insert(p[gen-1].r, i)
 			table.insert(p[gen+1].l, i)
 			
@@ -289,33 +287,32 @@ function read_conf_from_table(gens_table)
 			else
 				table.insert(ext_polygons, p[gen])
 			end
-			p[gen] = {b = i, l = {}, r = {}}	
+			p[gen] = {b = i, l = {i}, r = {}}
 			
 			a[gen], a[gen + 1] = a[gen + 1], a[gen]
 			is_int[gen] = true
 		end
 
-		a[0] = a[this:get_N()]
-		a[this:get_N() + 1] = this:get_N()
-
-		for i = 0, this:get_N() do
-			p[i].l1 = a[i]
-			p[i].l2 = a[i + 1]
-			if i ~= 0 then
-				p[i].d1 = 1
-			end
-			if i ~= this:get_N() then
-				p[i].d2 = 1
-			end
+		for i = 1, this:get_N() - 1 do
+			p[i].l2 = a[i]
+			p[i].l1 = a[i + 1]
+			p[i].d2 = 1
+			p[i].d1 = 1
 			table.insert(ext_polygons, p[i])
 		end
 		
+		p[0].l1 = a[1]
+		p[0].d1 = 1
+		table.insert(ext_polygons, p[0])
 		
+		p[this:get_N()].l2 = a[this:get_N()]
+		p[this:get_N()].d2 = 1
+		table.insert(ext_polygons, p[this:get_N()])
 		
 		return {ext_polygons = ext_polygons, int_polygons = int_polygons}
 	end
 
-	setmetatable(conf, configuration_mt)	
+	setmetatable(conf, configuration_mt)
 	
 	--print(N, k)
 	return conf
@@ -556,7 +553,6 @@ function init_svg()
 	os.setlocale("rus")
 end
 
-
 function convert_arn_to_svg(filename, svg_filename, border_size, color)
 	border_size = border_size or 0.1
 	color = color or 0
@@ -592,8 +588,6 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 	local height = math.floor((ymax - ymin) * (1 + border_size) + 1)
 	svg.set_size(width, height)
 	svg.begin_drawing()
-
-	--print(xmin, xmax, ymin, ymax)
 	
 	local offsetx = -xmin + (xmax - xmin) * border_size / 2.0
 	local offsety = -ymin + (ymax - ymin) * border_size / 2.0
@@ -606,27 +600,21 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 	for i, k in pairs(polygons.int_polygons) do
 		local polygon = {}
 		if (conf[k.b] % 2) == color then
-			table.insert(polygon, x[k.b])
-			table.insert(polygon, y[k.b])
-
-			for i = 1, table.getn(k.r) do
+			
+			for i = 1, table.getn(k.l) do
+				table.insert(polygon, x[k.l[i]])
+				table.insert(polygon, y[k.l[i]])
+			end
+			
+			for i = table.getn(k.r), 1, -1 do
 				table.insert(polygon, x[k.r[i]])
 				table.insert(polygon, y[k.r[i]])
 			end
 			
-			table.insert(polygon, x[k.e])
-			table.insert(polygon, y[k.e])
-			
-			for i = table.getn(k.l), 1, -1 do
-				table.insert(polygon, x[k.l[i]])
-				table.insert(polygon, y[k.l[i]])
-			end
-
 			svg.draw_polygon(polygon)
 		end
 	end
 	
-	-- [[
 	local corner = {{x = 0, y = 0}, {x = 0, y = height}, {x = width, y = height}, {x = width, y = 0}}
 	
 	local Omat = conf:get_Omatrix_indexed()
@@ -642,7 +630,6 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 	end	
 	
 	function sub(t1, t2)
-		--print(t1.x, t1.y, t2.x, t2.y)
 		return {x = t1.x - t2.x, y = t1.y - t2.y}
 	end	
 	
@@ -653,7 +640,6 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 
 	function get_border_intersection(l, d)
 		local t = get_tangent(l, d)
-		--print("inter", x[Omat[l][1] ], y[Omat[l][1] ], t.x, t.y)	
 		local ln
 		for i = 1, 4 do
 			local t1 = sub(corner[i], {x = x[Omat[l][1] ], y = y[Omat[l][1] ]})
@@ -670,98 +656,52 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 			corner[ln],
 			sub(corner[ln % 4 + 1], corner[ln])
 		)
-		--print("res", res.x, res.y)
-		return res
+		return res, ln
 	end
-	
+
 	for i, k in pairs(polygons.ext_polygons) do
 		local polygon = {}
 		if ((conf[k.b] or conf[k.e] or k.c) % 2) == color then
-			for i = table.getn(k.l), 1, -1 do
-				table.insert(polygon, x[k.l[i] ])
-				table.insert(polygon, y[k.l[i] ])
-				--print("l", x[k.l[i] ], y[k.l[i] ])
+			local t, c1 = get_border_intersection(k.l2, k.d2)
+			table.insert(polygon, t.x)
+			table.insert(polygon, t.y)
+			
+			local t, c2 = get_border_intersection(k.l1, k.d1)
+			
+			while c1 ~= c2 do
+				c2 = c2 % 4 + 1
+				table.insert(polygon, corner[c2].x)
+				table.insert(polygon, corner[c2].y)
 			end
 			
-			if not k.b and k.e then
-				local t = get_border_intersection(k.l1, k.d1)
-				table.insert(polygon, t.x)
-				table.insert(polygon, t.y)
-				--print("l1", t.x, t.y)
-				
-				t = get_border_intersection(k.l2, k.d2)
-				table.insert(polygon, t.x)
-				table.insert(polygon, t.y)
-				--print("l2", t.x, t.y)
-				
-				for i = 1, table.getn(k.r) do
+			table.insert(polygon, t.x)
+			table.insert(polygon, t.y)
+			
+			if not k.b then
+				for i = 1, table.getn(k.l) do
+					table.insert(polygon, x[k.l[i] ])
+					table.insert(polygon, y[k.l[i] ])
+				end
+
+				for i = table.getn(k.r), 1, -1 do
 					table.insert(polygon, x[k.r[i] ])
 					table.insert(polygon, y[k.r[i] ])
-					--print("r", x[k.r[i] ], y[k.r[i] ])
 				end
-				
-				table.insert(polygon, x[k.e])
-				table.insert(polygon, y[k.e])
-				--print("e", x[k.e], y[k.e])
-				
-			elseif k.b and not k.e then
-				table.insert(polygon, x[k.b])
-				table.insert(polygon, y[k.b])
-				--print("b", x[k.b], y[k.b])
-				
-				for i = 1, table.getn(k.r) do
-					table.insert(polygon, x[k.r[i] ])
-					table.insert(polygon, y[k.r[i] ])
-					--print("r", x[k.r[i] ], y[k.r[i] ])
-				end
-				
-				local t = get_border_intersection(k.l2, k.d2)
-				table.insert(polygon, t.x)
-				table.insert(polygon, t.y)
-				--print("l2", t.x, t.y)
-				
-				t = get_border_intersection(k.l1, k.d1)
-				table.insert(polygon, t.x)
-				table.insert(polygon, t.y)
-				--print("l1", t.x, t.y)
-			elseif k.c == 0 then
-				local t = get_border_intersection(k.l1, k.d1)
-				table.insert(polygon, t.x)
-				table.insert(polygon, t.y)
-				--print("l1", t.x, t.y)
-				
-				for i = 1, table.getn(k.r) do
-					table.insert(polygon, x[k.r[i] ])
-					table.insert(polygon, y[k.r[i] ])
-					--print("r", x[k.r[i] ], y[k.r[i] ])
-				end
-				
-				t = get_border_intersection(k.l2, k.d2)
-				table.insert(polygon, t.x)
-				table.insert(polygon, t.y)
-				--print("l2", t.x, t.y)
 			else
-				local t = get_border_intersection(k.l2, k.d2)
-				table.insert(polygon, t.x)
-				table.insert(polygon, t.y)
-				--print("l1", t.x, t.y)
-				
-				for i = 1, table.getn(k.r) do
+				for i = table.getn(k.r), 1, -1 do
 					table.insert(polygon, x[k.r[i] ])
 					table.insert(polygon, y[k.r[i] ])
-					--print("r", x[k.r[i] ], y[k.r[i] ])
 				end
 				
-				t = get_border_intersection(k.l1, k.d1)
-				table.insert(polygon, t.x)
-				table.insert(polygon, t.y)
-				--print("l2", t.x, t.y)
+				for i = 1, table.getn(k.l) do
+					table.insert(polygon, x[k.l[i] ])
+					table.insert(polygon, y[k.l[i] ])
+				end
 			end
+
 			svg.draw_polygon(polygon)
 		end
 	end
-	--]]
 	
 	svg.end_drawing()
-
 end
