@@ -48,7 +48,7 @@ int b[MAX_N][MAX_N];
 
 
 void do_stat(int max_level) {
-	int o[MAX_N][MAX_N], p1[MAX_N], p2[MAX_N];
+	int o[MAX_N][MAX_N], p1[MAX_N], p2[MAX_N], d[MAX_N];
 	int left, right, i, j, s, gen, h1, h2;
 	static int max_s = -1;
 	s = 0;
@@ -65,14 +65,8 @@ void do_stat(int max_level) {
 	//max_s = s;
 
 	//printf("%d)\n", max_s);
-	//for (i = 1; i <= max_level; ++i) {
-	//	printf("%d] ", conf.rows[i].gen - 1);
-	//	for (j = 0; j < conf.rows[i].len; ++j) {
-	//		printf("%d ", line_r1(i, j, 0));
-	//	}
-	//	printf("\n");
-	//}
-	//printf("\n");
+
+
 
 	// Восстанавливаем Оматрицу
 	for (i = 0; i < n; ++i) {
@@ -136,12 +130,57 @@ void do_stat(int max_level) {
 	if (s < 0)
 		s = -s;
 
-	if (s <= max_s)
+	if (s != 209)
 		return;
 
 	max_s = s;
 
-	printf("\ns = %d\n", s);
+	for (i = 0; i < n; ++i) {
+		p1[i] = 0; // Положение кобок в Оматрице
+		p2[i] = i; // Массив а
+	}
+	//printf("generators:\n");
+	for (i = 0; i < n*(n-1)/2; ++i) {
+		for (gen = 0; gen < n - 1; ++gen) {
+			left = p2[gen];
+			right = p2[gen + 1];
+			if (o[left][p1[left]] == right && o[right][p1[right]] == left) {
+				++p1[left];
+				++p1[right];
+				printf("%d ", gen);
+				//s += (gen % 2)*2 - 1;
+				p2[gen] = right;
+				p2[gen + 1] = left;
+				break;
+			}
+		}
+		assert(gen != n - 1);
+	}
+	printf("\n");
+
+	//for (i = 0; i < delta; ++i) {
+	//	d[i] = 2;
+	//}
+
+	//for (i = 1; i <= max_level; ++i) {
+	//	printf("%d] ", gen = conf.rows[i].gen - 1);
+	//	for (j = 0; j < conf.rows[i].len; ++j) {
+	//		printf("%d ", line_r1(i, j, 0));
+	//	}
+	//	printf("\n");
+
+	//	d[gen] = 1;
+	//	d[(gen - 1 + conf.rows[i - 1].len) % conf.rows[i - 1].len]++;
+	//	d[(gen + 1) % conf.rows[i - 1].len]++;
+
+	//	for (j = 0; j < conf.rows[i - 1].len; ++j) {
+	//		printf("%d ", d[j]);
+	//	}
+	//	printf("\n");
+	//}
+	//printf("\n");
+
+	//printf("\ns = %d\n", s);
 }
 
 void run() {
@@ -186,7 +225,7 @@ void run() {
 		b[right][left] = 1;
 	}
 
-	d[0] = 0;
+	d[0] = 1;
 	d[delta]++;
 	d[1]++;
 
@@ -224,20 +263,20 @@ void run() {
 			// Оптимизация
 			conf.rows[level].defects = conf.rows[level - 1].defects;
 			if ((cur_generator % 2)) { //Нечетный белый генератор
-				if (d[cur_generator] < 3)
-					//continue;
-				if (d[(cur_generator - 1 + conf.rows[level - 1].len) % conf.rows[level - 1].len] == 1) {
-					conf.rows[level].defects++;
-				}
-				if (d[(cur_generator + 1) % conf.rows[level - 1].len] == 1) {
-					conf.rows[level].defects++;
-				}
-				if (conf.rows[level].defects > 1) {
+				if (d[cur_generator] < 4)
+					continue;
+				if (d[(cur_generator - 1 + conf.rows[level - 1].len) % conf.rows[level - 1].len] >= 1) {
 					//continue;
 				}
+				if (d[(cur_generator + 1) % conf.rows[level - 1].len] >= 1) {
+					//continue;
+				}
+				//if (conf.rows[level].defects > 1) {
+				//	continue;
+				//}
 			}
 			conf.rows[level - 1].stack = d[cur_generator];
-			d[cur_generator] = 0;
+			d[cur_generator] = 1;
 			d[(cur_generator - 1 + conf.rows[level - 1].len) % conf.rows[level - 1].len]++;
 			d[(cur_generator + 1) % conf.rows[level - 1].len]++;
 
@@ -284,10 +323,13 @@ void run() {
 					if (left == right) {
 						flag = 1;
 						min_i = i;
+						d[(i-1 + conf.rows[level].len) % conf.rows[level].len] += d[(i+1) % conf.rows[level].len];
 						for (j = i + 2; j < conf.rows[level].len; ++j) {
 							conf.rows[level].line[j - 2] = conf.rows[level].line[j];
 							conf.rows[level].round[j - 2] = conf.rows[level].round[j];
+							d[j - 2] = d[j];
 						}
+
 						conf.rows[level].len -= 2;
 						continue;
 					}
@@ -311,6 +353,17 @@ void run() {
 			if (level == max_level) {
 				do_stat(max_level);
 				continue;
+			}
+
+			if ((cur_generator % 2) && conf.rows[level].len == conf.rows[level - 1].len) { //Нечетный белый генератор
+				if (d[cur_generator] < 4)
+					//continue;
+				if (d[(cur_generator - 1 + conf.rows[level - 1].len) % conf.rows[level - 1].len] >= 3) {
+					continue;
+				}
+				if (d[(cur_generator + 1) % conf.rows[level - 1].len] >= 3) {
+					continue;
+				}
 			}
 
 			// Устанавливаем начальный генератор следущего уровня
