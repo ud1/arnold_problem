@@ -5,6 +5,7 @@ additional_gens = os.getenv("ADDITIONAL_GENS")
 filename = os.getenv("CONF_FILE")
 do_not_extract_tdc = os.getenv("DO_NOT_EXTRACT_TDC")
 
+
 if not do_not_extract_tdc then
 	io.input(filename)
 	confs = {}
@@ -12,8 +13,8 @@ if not do_not_extract_tdc then
 		local line = io.read()
 		if line == nil then break end
 		
-		if end_gens then
-			line = line .. " " .. end_gens
+		if additional_gens then
+			line = line .. " " .. additional_gens
 		end
 		local conf = read_conf(line)
 		
@@ -43,6 +44,8 @@ else
 	confs = load_confs(filename, additional_gens)
 end
 
+print("#", "s")
+
 if verbose then
 	local confs_num = {}
 	
@@ -53,6 +56,8 @@ if verbose then
 	for i, k in ipairs(confs) do
 		local s = k:get_s()
 	
+		print(i, s)
+		
 		confs_num[s] = (confs_num[s] or 0) + 1
 		max_s = (max_s > s) and max_s or s
 		min_s = (min_s < s) and min_s or s
