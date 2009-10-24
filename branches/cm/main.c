@@ -24,6 +24,7 @@ int n, m, k, delta;
 
 int b[MAX_N][MAX_N];
 int parallels[MAX_N];
+int old_gens[MAX_LEV];
 
 int get_line(int pos) {
 	if (pos / n) {
@@ -52,7 +53,7 @@ int line_rh1(int l, int i, int r) {
 
 void do_stat(int max_level) {
 	int o[MAX_N][MAX_N], p1[MAX_N], p2[MAX_N], a[MAX_N];
-	int left, right, i, j, s, gen, h1, h2;
+	int left, right, i, j, s, gen, h1, h2, diffs;
 	static int max_s = -1;
 	s = 0;
 
@@ -95,7 +96,7 @@ void do_stat(int max_level) {
 	}
 
 	s = 0;
-	//printf("generators:\n");
+	diffs = 0;
 	for (i = 0; i < n*(n-1)/2 - k; ++i) {
 		for (gen = 0; gen < n - 1; ++gen) {
 			left = a[gen];
@@ -105,8 +106,9 @@ void do_stat(int max_level) {
 			{
 				++p1[left];
 				++p1[right];
-				//printf("%d ", gen);
 				s += (gen % 2)*2 - 1;
+				if (old_gens[i] != gen)
+					++diffs;
 				a[gen] = right;
 				a[gen + 1] = left;
 				break;
@@ -114,6 +116,9 @@ void do_stat(int max_level) {
 		}
 		assert(gen != n - 1);
 	}
+
+	if (!diffs) // совпадение генератором с последней найденной конф
+		return;
 
 	if (s < 0)
 		s = -s;
@@ -136,6 +141,7 @@ void do_stat(int max_level) {
 			if (o[left][p1[left]] == right && o[right][p1[right]] == left) {
 				++p1[left];
 				++p1[right];
+				old_gens[i] = gen;
 				printf("%d ", gen);
 				p2[gen] = right;
 				p2[gen + 1] = left;
@@ -177,6 +183,10 @@ void init() {
 	conf.rows[1].len = delta;
 	conf.rows[2].last_gen = -1;
 	conf.rows[2].defects = 0;
+
+	for (i = 0; i < n*(n-1)/2-k; ++i) {
+		old_gens[i] = 0;
+	}
 }
 
 void run() {
