@@ -1,5 +1,6 @@
-#include "assert.h"
-#include "stdio.h"
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
 
 #define MAX_N 45
 #define MAX_DELTA MAX_N
@@ -19,36 +20,38 @@ typedef struct {
 } metro_st;
 
 metro_st conf;
-int n, m, delta;
+int n, m, k, delta;
 
-int line(int l, int i) {
-	return (conf.rows[l].line[i] +  conf.rows[l].round[i] * delta + n) % n;
+int b[MAX_N][MAX_N];
+int parallels[MAX_N];
+
+int get_line(int pos) {
+	if (pos / n) {
+		return parallels[pos % n];
+	} else {
+		return pos % n;
+	}
 }
 
-int line_r(int l, int i, int r) {
-	return (conf.rows[l].line[i] + (conf.rows[l].round[i] + r) * delta + n) % n;
+int get_pos(int lv, int i, int r) {
+	int rnd = (i + conf.rows[lv].len) / conf.rows[lv].len + r - 1;
+	int p = (i + conf.rows[lv].len) % conf.rows[lv].len;
+	return (conf.rows[lv].line[p] + (conf.rows[lv].round[p] + rnd) * delta + 2*n) % (2*n);
 }
 
-int line_r1(int l, int i, int r) {
-	return line_r(l, i % conf.rows[l].len, r + i / conf.rows[l].len);
-}
-
-int line_rh(int l, int i, int r) {
-	return (conf.rows[l].line[i] + (conf.rows[l].round[i] + r) * delta);
+int line(int l, int i, int r) {
+	return get_line(get_pos(l, i, r));
 }
 
 int line_rh1(int l, int i, int r) {
-	int val = (line_rh(l, i % conf.rows[l].len, r + i / conf.rows[l].len) + 2*n) % (2*n);
+	int val = get_pos(l, i, r);
 	if (val >=0 && val < n)
 		return 0;
 	return 1;
 }
 
-int b[MAX_N][MAX_N];
-
-
 void do_stat(int max_level) {
-	int o[MAX_N][MAX_N], p1[MAX_N], p2[MAX_N];
+	int o[MAX_N][MAX_N], p1[MAX_N], p2[MAX_N], a[MAX_N];
 	int left, right, i, j, s, gen, h1, h2;
 	static int max_s = -1;
 	s = 0;
@@ -57,14 +60,17 @@ void do_stat(int max_level) {
 	for (i = 0; i < n; ++i) {
 		p1[i] = 0;
 		p2[i] = n - 2;
+		if (parallels[i] != i) {
+			p2[i]--;
+		}
 	}
 
 	for (i = 0; i < max_level; ++i) {
 		// Все генераторы на 1 больше
 		gen = conf.rows[i+1].gen - 1;
 		for (j = 0; j < m; ++j) {
-			left = line_r1(i, gen, j);
-			right = line_r1(i, gen + 1, j);
+			left = line(i, gen, j);
+			right = line(i, gen + 1, j);
 			if (!(h1 = line_rh1(i, gen, j))) {
 				o[left][p1[left]++] = right;
 			} else {
@@ -80,23 +86,29 @@ void do_stat(int max_level) {
 
 	// Восстанавливаем генераторы по Оматрице
 	for (i = 0; i < n; ++i) {
-		p1[i] = 0; // Положение кобок в Оматрице
-		p2[i] = i; // Массив а
+		p1[i] = 0; // Положение скобок в Оматрице
+		p2[i] = n - 2;
+		if (parallels[i] != i) {
+			p2[i]--;
+		}
+		a[i] = i;
 	}
 
 	s = 0;
 	//printf("generators:\n");
-	for (i = 0; i < n*(n-1)/2; ++i) {
+	for (i = 0; i < n*(n-1)/2 - k; ++i) {
 		for (gen = 0; gen < n - 1; ++gen) {
-			left = p2[gen];
-			right = p2[gen + 1];
-			if (o[left][p1[left]] == right && o[right][p1[right]] == left) {
+			left = a[gen];
+			right = a[gen + 1];
+			if (p1[left] <= p2[left] && p1[right] <= p2[right] && 
+				o[left][p1[left]] == right && o[right][p1[right]] == left) 
+			{
 				++p1[left];
 				++p1[right];
 				//printf("%d ", gen);
 				s += (gen % 2)*2 - 1;
-				p2[gen] = right;
-				p2[gen + 1] = left;
+				a[gen] = right;
+				a[gen + 1] = left;
 				break;
 			}
 		}
@@ -106,17 +118,18 @@ void do_stat(int max_level) {
 	if (s < 0)
 		s = -s;
 
-	if (s <= max_s)
+	if (s < max_s)
 		return;
 
 	max_s = s;
 
 	for (i = 0; i < n; ++i) {
-		p1[i] = 0; // Положение кобок в Оматрице
+		p1[i] = 0; // Положение скобок в Оматрице
 		p2[i] = i; // Массив а
 	}
 	//printf("generators:\n");
-	for (i = 0; i < n*(n-1)/2; ++i) {
+	printf("%02d] ", s);
+	for (i = 0; i < n*(n-1)/2 - k; ++i) {
 		for (gen = 0; gen < n - 1; ++gen) {
 			left = p2[gen];
 			right = p2[gen + 1];
@@ -132,62 +145,102 @@ void do_stat(int max_level) {
 		assert(gen != n - 1);
 	}
 	printf("\n");
-
-	printf("\ns = %d\n", s);
 }
 
-void run() {
-	int cur_generator, level, max_level, left, right, i, j, temp, flag, min_i;
+void init() {
+	int i, j;
 	delta = 2*n / m;
-	if (2*n % m) {
-		printf("ERROR: 2*n % m != 0\n");
+	if (2*n % m || k % m) {
+		printf("ERROR: invalid m, n, k\n");
 		return;
 	}
 
-	max_level = n*(n-1)/(2*m);
-	level = 2;
+	for (i = 0; i < n; ++i) {
+		parallels[i] = i;
+	}
 
 	for (i = 0; i < delta; ++i) {
 		conf.rows[0].line[i] = i;
 		conf.rows[1].line[i] = i;
-		conf.rows[level - 1].round[i] = 0;
+		conf.rows[0].round[i] = 0;
+		conf.rows[1].round[i] = 0;
 		conf.rows[1].d[i] = 2;
 	}
-	conf.rows[1].line[0] = 1;
-	conf.rows[1].line[1] = 0;
-
-	conf.rows[1].gen = 1;
-	conf.rows[1].len = delta;
-	conf.rows[0].len = delta;
-
-	conf.rows[2].gen = 1;
-	conf.rows[2].last_gen = -1;
-	conf.rows[2].defects = 0;
 
 	for (i = 0; i < n; ++i) {
 		for (j = 0; j < n; ++j) {
 			b[i][j] = 0;
 		}
 	}
+
+	conf.rows[0].len = delta;
+	conf.rows[1].len = delta;
+	conf.rows[2].last_gen = -1;
+	conf.rows[2].defects = 0;
+}
+
+void run() {
+	int cur_generator, level, max_level, left, right, i, j, temp, flag, min_i, white;
+	max_level = (n*(n-1)/2 - k) / m;
+
+	// Выбираем начальный генератор
+	for (cur_generator = 0; cur_generator < delta; ++cur_generator) {
+		for (i = 0; i < m; ++i) {
+			left = line(1, cur_generator, i);
+			right = line(1, cur_generator + 1, i);
+			if (b[left][right] || b[right][left])
+				break;
+		}
+		if (i == m)
+			break;
+	}
+
+	assert(cur_generator < delta);
+
+	// устанавливаем четность
+	white = (cur_generator + 1) % 2;
+	// применяем генератор
+	level = 1;
+	right = (cur_generator + 1) % conf.rows[level].len;
+	temp = conf.rows[level].line[cur_generator];
+	conf.rows[level].line[cur_generator] = conf.rows[level].line[right];
+	conf.rows[level].line[right] = temp;
+
+	temp = conf.rows[level].round[cur_generator];
+	conf.rows[level].round[cur_generator] = conf.rows[level].round[right];
+	conf.rows[level].round[right] = temp;
+
+	// Крайние
+	if (cur_generator == conf.rows[level].len - 1) {
+		--conf.rows[level].round[0];
+		++conf.rows[level].round[cur_generator];
+	}
+
+	conf.rows[1].gen = cur_generator + 1; // В массиве генераторы на 1 больше
+	conf.rows[2].gen = cur_generator - 1; // Отсюда стартанет поиск
+	
 	// Обновляем b-матрицу
 	for (i = 0; i < m; ++i) {
-		left = line_r(1, 0, i);
-		right = line_r1(1, 1, i);
+		left = line(1, cur_generator, i);
+		right = line(1, cur_generator + 1, i);
 		b[left][right] = 1;
 		b[right][left] = 1;
 	}
 
-	conf.rows[1].d[0] = 1;
-	conf.rows[1].d[delta]++;
-	conf.rows[1].d[1]++;
+	// Обновляем массив d
+	conf.rows[level].d[cur_generator] = 1;
+	conf.rows[level].d[(cur_generator - 1 + conf.rows[level].len) % conf.rows[level].len]++;
+	conf.rows[level].d[(cur_generator + 1) % conf.rows[level].len]++;
 
+	// начинаем поиск
+	level = 2;
 	while (level > 1) {
 		if ((cur_generator = conf.rows[level].last_gen) >= 0) {
 			conf.rows[level].last_gen = -1;
 			// Удаляем изменения из b-матрицы
 			for (i = 0; i < m; ++i) {
-				left = line_r(level - 1, cur_generator, i);
-				right = line_r1(level - 1, cur_generator + 1, i);
+				left = line(level - 1, cur_generator, i);
+				right = line(level - 1, cur_generator + 1, i);
 				assert(b[left][right]);
 				assert(b[right][left]);
 				b[left][right] = 0;
@@ -205,12 +258,16 @@ void run() {
 		}
 
 		// Проверка b-матрицы
-		left = line(level - 1, cur_generator);
-		right = line_r1(level - 1, cur_generator + 1, 0);
-		if (!b[left][right]) {
+		for (i = 0; i < m; ++i) {
+			left = line(level - 1, cur_generator, 0);
+			right = line(level - 1, cur_generator + 1, 0);
+			if (b[left][right])
+				break;
+		}
+		if (i == m) {
 			// Оптимизация
 			//conf.rows[level].defects = conf.rows[level - 1].defects;
-			if (cur_generator % 2) { //Нечетный белый генератор
+			if (cur_generator % 2 == white) { //Нечетный белый генератор
 				if (conf.rows[level-1].d[cur_generator] < 4)
 					continue;
 			}
@@ -228,8 +285,8 @@ void run() {
 
 			// Обновляем b-матрицу
 			for (i = 0; i < m; ++i) {
-				left = line_r(level - 1, cur_generator, i);
-				right = line_r1(level - 1, cur_generator + 1, i);
+				left = line(level - 1, cur_generator, i);
+				right = line(level - 1, cur_generator + 1, i);
 				assert(!b[left][right]);
 				assert(!b[right][left]);
 				b[left][right] = 1;
@@ -258,8 +315,8 @@ void run() {
 
 				// вычеркиваем промежуточные
 				for (i = 0; i < conf.rows[level].len - 1; ++i) {
-					left = line(level, i);
-					right = line(level, i + 1);
+					left = line(level, i, 0);
+					right = line(level, i + 1, 0);
 					if (left == right) {
 						flag = 1;
 						min_i = i;
@@ -277,13 +334,14 @@ void run() {
 
 				// вычеркиваем крайние
 				if (conf.rows[level].len) {
-					left = line(level, conf.rows[level].len - 1);
-					right = line_r(level, 0, 1);
+					left = line(level, conf.rows[level].len - 1, 0);
+					right = line(level, 0, 1);
 					if (left == right) {
 						flag = 1;
 						min_i = 0;
-						conf.rows[level].line[0] = conf.rows[level].line[conf.rows[level].len - 1];
-						conf.rows[level].round[0] = conf.rows[level].round[conf.rows[level].len - 1] - 1;
+						conf.rows[level].d[0] += conf.rows[level].d[conf.rows[level].len-2];
+						conf.rows[level].line[0] = conf.rows[level].line[conf.rows[level].len - 2];
+						conf.rows[level].round[0] = conf.rows[level].round[conf.rows[level].len - 2] - 1;
 						conf.rows[level].len -= 2;
 						continue;
 					}
@@ -295,7 +353,7 @@ void run() {
 				continue;
 			}
 
-			if ((cur_generator % 2) && conf.rows[level].len == conf.rows[level - 1].len) { //Нечетный белый генератор
+			if ((cur_generator % 2 == white) && conf.rows[level].len == conf.rows[level - 1].len) { //Нечетный белый генератор
 				if (conf.rows[level].d[(cur_generator - 1 + conf.rows[level - 1].len) % conf.rows[level - 1].len] >= 3) {
 					continue;
 				}
@@ -310,8 +368,8 @@ void run() {
 				++level;
 			} else {
 				// Было вычеркивание
-				//conf.rows[level + 1].gen = min(min_i - 1, cur_generator - 1);
-				conf.rows[level + 1].gen = 0;
+				conf.rows[level + 1].gen = min(min_i - 1, cur_generator - 1);
+				//conf.rows[level + 1].gen = 0;
 				++level;
 			}
 			conf.rows[level].last_gen = -1;
@@ -319,9 +377,30 @@ void run() {
 	}
 }
 
+void set_parallels(int j) {
+	int i, left, right;
+	for (i = 0; i < m; ++i) {
+		left = line(1, j, i);
+		right = line(1, j + 1, i);
+		assert(!b[left][right]);
+		assert(!b[right][left]);
+		parallels[left] = right;
+		parallels[right] = left;
+		b[left][right] = 1;
+		b[right][left] = 1;
+	}
+}
+
 int main() {
-	n = 35;
-	m = 5;
+	int i;
+	n = 24;
+	m = 3;
+	k = 6;
+
+	init();
+	set_parallels(0);
+	set_parallels(4);
+
 	run();
 	return 0;
 }
