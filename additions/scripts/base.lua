@@ -33,6 +33,13 @@ Omatrix {
 	out:		this
 	print_matrix()
 	
+	out:		array of generators
+	get_gens()
+	
+	in:			int: line number to remove
+	out:		this
+	remove_line(l)
+	
 	operator ==
 }
 
@@ -46,7 +53,7 @@ poligon_num {
 --]]
 
 -- in:		string: filename; string: end generators
--- out:	array of the configurations
+-- out:		array of the configurations
 function load_confs(filename, end_gens)
 	io.input(filename)
 	local confs = {}
@@ -61,6 +68,8 @@ function load_confs(filename, end_gens)
 	return confs
 end
 
+-- in:		array of generators
+-- out:		configuration
 function read_conf_from_table(gens_table)
 	local conf = {}
 	for i = 1, table.getn(gens_table) do
@@ -186,6 +195,76 @@ function read_conf_from_table(gens_table)
 				io.write("\n")
 			end
 			io.write("\n")
+			return this
+		end
+		
+		matrix.get_gens = function(this)
+			local result = {}
+			local p1 = {}
+			local p2 = {}
+			local a = {}
+			local n = table.getn(this)
+			local k = 0
+			for i = 1, n do
+				p1[i] = 1
+				p2[i] = n - 1
+				if this.parallels[i] ~= i then
+					p2[i] = p2[i] - 1
+					k = k + 1
+				end
+				a[i] = i
+			end
+			k = k / 2
+			for i = 1, n*(n-1)/2-k do
+				for gen = 1, n-1 do
+					local left = a[gen]
+					local right = a[gen+1]
+					if (p1[left] <= p2[left] and p1[right] <= p2[right]
+						and this[left][p1[left]] == right and o[right][p1[right]] == left)
+					then
+						p1[left] = p1[left] + 1
+						p1[right] = p1[right] + 1
+						a[gen] = right
+						a[gen+1] = left
+						result[i] = gen
+						break
+					end
+				end
+			end
+			return result
+		end
+		
+		matrix.remove_line = function(this, l)
+			local n = table.getn(this)
+			if l > n then
+				print("remove_line error, l > n")
+				return
+			end
+			for i = l, n-1 do
+				this[i] = this[i+1]
+			end
+			this[n] = nil
+			n = n-1
+			for i = 1, n do
+				local llen = table.getn(this[i])
+				for j = 1, llen do
+					if this[i][j] == l then
+						for k = j, llen-1 do
+							this[i][k] = this[i][k+1]
+						end
+						this[i][llen] = nil
+						break
+					end
+				end
+			end
+			
+			for i = 1, n do
+				for j = 1, table.getn(this[i]) do
+					if this[i][j] > l then
+						this[i][j] = this[i][j] - 1
+					end
+				end
+			end
 			return this
 		end
 		
@@ -550,7 +629,6 @@ end
 
 function init_svg()
 	package.loadlib("lua_svg.dll", "init")()
-	os.setlocale("rus")
 end
 
 function convert_arn_to_svg(filename, svg_filename, border_size, color)
@@ -558,6 +636,14 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 	color = color or 0
 	
 	ini = parse_ini(filename)
+	
+	
+	if tonumber(ini.version.version) == 1 then
+		os.setlocale("rus")	
+	else
+		os.setlocale("eng")	
+	end
+	
 	if not ini.parameters.number_of_generators then return nil end
 	local n_gens = tonumber(ini.parameters.number_of_generators)
 
@@ -579,13 +665,17 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 		xmin = (x[i] < xmin) and x[i] or xmin
 		ymin = (y[i] < ymin) and y[i] or ymin
 	end
-
+	
+	local zoomx = 800 / (math.floor((xmax - xmin) * (1 + border_size) + 1))
+	local zoomy = 600 / (math.floor((ymax - ymin) * (1 + border_size) + 1))
+	local zoom = (zoomx > zoomy) and zoomy or zoomx
+	
 	conf = read_conf_from_table(conf)
 	local polygons = conf:get_polygons()
 
 	svg.set_name(svg_filename)
-	local width = math.floor((xmax - xmin) * (1 + border_size) + 1)
-	local height = math.floor((ymax - ymin) * (1 + border_size) + 1)
+	local width = (math.floor((xmax - xmin) * (1 + border_size) + 1)) * zoom
+	local height = (math.floor((ymax - ymin) * (1 + border_size) + 1)) * zoom
 	svg.set_size(width, height)
 	svg.begin_drawing()
 	
@@ -593,9 +683,13 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 	local offsety = -ymin + (ymax - ymin) * border_size / 2.0
 	
 	for i = 1, n_gens do
-		x[i] = x[i] + offsetx
-		y[i] = y[i] + offsety
+		x[i] = (x[i] + offsetx) * zoom
+		y[i] = (y[i] + offsety) * zoom
 	end
+	
+	local Omat = conf:get_Omatrix_indexed()	
+	print(os.date())
+	
 	
 	for i, k in pairs(polygons.int_polygons) do
 		local polygon = {}
@@ -616,9 +710,7 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 	end
 	
 	local corner = {{x = 0, y = 0}, {x = 0, y = height}, {x = width, y = height}, {x = width, y = 0}}
-	
-	local Omat = conf:get_Omatrix_indexed()
-	
+		
 	function get_tangent(l, d)
 		local g1 = Omat[l][1]
 		local g2 = Omat[l][table.getn(Omat[l])]
