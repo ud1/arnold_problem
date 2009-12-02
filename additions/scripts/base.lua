@@ -212,6 +212,88 @@ Omatrix_mt.__index = {
 		return this.parallels[this:norm(rotation)] <= this:norm(rotation)
 	end,
 	
+	check_cm = function(this, m)
+		if (2*this.n % m) ~= 0 then
+			return false
+		end
+		
+		local rotation = 2*this.n / m	
+		
+		if not this:check_rotation(rotation) then
+			return false
+		end
+
+		for i = 1, this.n do
+			if (table.getn(this[i]) ~= this:get_line_len(i, rotation)) then
+				return false
+			end
+			
+			for j = 1, table.getn(this[i]) do
+				if this[i][j] ~= this:get_val(rotation, i, j) then 
+					return false
+				end
+			end
+		end
+		
+		return true
+	end,
+	
+	check_all_cm = function(this)
+		for m = this.n, 2, -1 do
+			if this:check_cm(m) then
+				return true, m
+			end
+		end
+		return false
+	end,
+	
+	check_d2 = function(this)
+		o = this:get_reflected()
+		local function cmp_rotation(rotation)
+			for i = 1, o.n do
+				if (table.getn(o[i]) ~= this:get_line_len(i, rotation)) then
+					return false
+				end
+				
+				for j = 1, table.getn(o[i]) do
+					if o[i][j] ~= this:get_val(rotation, i, j) then 
+						return false
+					end
+				end
+			end
+
+			return true
+		end
+		
+		for i = 0, 2*this.n-1 do
+			if this:check_rotation(i) then
+				if cmp_rotation(i) then
+					return true
+				end
+			end
+		end
+		return false
+	end,
+	
+	check_sym = function(this)
+		cm, m = this:check_all_cm()
+		d2 = this:check_d2()
+		
+		if cm and d2 then
+			return string.format("d%d", m);
+		end
+		
+		if cm then
+			return string.format("c%d", m);
+		end
+		
+		if d2 then
+			return "d2";
+		end
+		
+		return nil
+	end,
+	
 	print = function(this)
 		for i = 1, table.getn(this) do
 			io.write(string.format("%2d ||%2d)\t", i, this.parallels[i] or 0))
