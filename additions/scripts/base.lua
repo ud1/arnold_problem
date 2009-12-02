@@ -31,7 +31,7 @@ configuration {
 
 Omatrix {
 	out:		this
-	print_matrix()
+	print()
 	
 	out:		array of generators
 	get_gens()
@@ -52,277 +52,21 @@ poligon_num {
 
 --]]
 
--- in:		string: filename; string: end generators
--- out:		array of the configurations
-function load_confs(filename, end_gens)
-	io.input(filename)
-	local confs = {}
-	while true do
-		local line = io.read()
-		if line == nil then break end
-		if end_gens then
-			line = line .. " " .. end_gens
+-----------------------------------[METATABLES]-------------------------------------------------
+polygon_num_mt = {
+	__eq = function (a, b)
+		local function cmp(t1, t2)
+			if (t1.max_n ~= t2.max_n) then return false end
+			for i = 1, t1.max_n do
+				if (t1[i] or 0) ~= (t2[i] or 0) then return false end
+			end
+			return true
 		end
-		table.insert(confs, read_conf(line))
-    end
-	return confs
-end
-
--- in:		array of generators
--- out:		configuration
-function read_conf_from_table(gens_table)
-	local conf = {}
-	for i = 1, table.getn(gens_table) do
-		conf[i] = gens_table[i]
-	end
+		return cmp(a.ext, b.ext) and cmp(a.int, b.int)
+	end,
 	
-	configurations[conf] = {N = 0, k = 0}
-	max_gen = conf[1]
-	for _, w in ipairs(conf) do
-		if max_gen < w then max_gen = w end
-	end
-	local N = max_gen + 1
-	local k = N*(N-1)/2 - table.getn(conf)
-	configurations[conf].N = N
-	configurations[conf].k = k
-	
-	local s = - 1 + (N % 2);
-	for i, k in ipairs(conf) do
-		s = s - ((k-1) % 2)*2 + 1;
-	end
-	if s < 0 then s = -s end
-	configurations[conf].s = s
-		
-	conf.get_N = function(this)
-		return configurations[this].N
-	end
-	
-	conf.get_k = function(this)
-		return configurations[this].k
-	end
-	
-	conf.get_s = function(this)
-		return configurations[this].s
-	end
-	
-	conf.print_gens = function(this)
-		for i, k in ipairs(this) do
-			io.write(string.format("%d ",k-1))
-		end
-		io.write("\n")	
-	end
-	
-	conf.print = function(this) 
-		--print("\ngenerators:")
-		this:print_gens()
-		
-		print("N = ", configurations[this].N)
-		print("k = ", configurations[this].k)
-		print("s = ", configurations[this].s)
-	end
-
-	conf.get_Omatrix_indexed = function(this)
-		local matrix = {}
-		local lines = {}
-		local positions = {}
-		for i = 1, this:get_N() do
-			matrix[i] = {}
-			lines[i] = i
-		end
-		for i = 1, table.getn(this) do
-			local gen = this[i]
-			local first = lines[gen]
-			local second = lines[gen+1]
-			
-			table.insert(matrix[first], i)
-			table.insert(matrix[second], i)
-			lines[gen] = second;
-			lines[gen+1] = first;
-		end
-		return matrix
-	end
-	
-	conf.get_Omatrix = function(this, recreate)
-		if not recreate and Omatrices[this] then
-			return Omatrices[this]
-		end
-
-		local matrix = {}
-		local lines = {}
-		local positions = {}
-		matrix.parallels = {}
-		for i = 1, this:get_N() do
-			matrix[i] = {}
-			lines[i] = i
-			positions[i] = 0
-			matrix.parallels[i] = i
-		end
-		for i = 1, table.getn(this) do
-			local gen = this[i]
-			local first = lines[gen]
-			local second = lines[gen+1]
-			positions[first] = positions[first] + 1
-			positions[second] = positions[second] + 1
-			
-			matrix[first][positions[first]] = second;
-			lines[gen] = second;
-			
-			matrix[second][positions[second]] = first;
-			lines[gen+1] = first;
-		end
-		for i = 1, this:get_N()-1 do
-			if lines[i] < lines[i+1] then
-				matrix.parallels[lines[i]] = lines[i+1]
-				matrix.parallels[lines[i+1]] = lines[i]
-			end
-		end
-		--[[for i = 1, this:get_N() do
-			for j, v in ipairs(matrix[i]) do
-				matrix[i][j] = matrix[i][j] - i
-				if matrix[i][j] < 0 then
-					matrix[i][j] = matrix[i][j] + this:get_N()
-				end
-			end
-		end]]
-		setmetatable(matrix, Omatrix_mt)
-		
-		matrix.print_matrix = function(this)
-			for i = 1, table.getn(this) do
-				io.write(string.format("%2d ||%2d)\t", i, this.parallels[i] or 0))
-				for k = 1, table.getn(this[i]) do
-					io.write(string.format("%d\t", this[i][k]))
-				end
-				io.write("\n")
-			end
-			io.write("\n")
-			return this
-		end
-		
-		matrix.get_gens = function(this)
-			local result = {}
-			local p1 = {}
-			local p2 = {}
-			local a = {}
-			local n = table.getn(this)
-			local k = 0
-			for i = 1, n do
-				p1[i] = 1
-				p2[i] = n - 1
-				if this.parallels[i] ~= i then
-					p2[i] = p2[i] - 1
-					k = k + 1
-				end
-				a[i] = i
-			end
-			k = k / 2
-			for i = 1, n*(n-1)/2-k do
-				for gen = 1, n-1 do
-					local left = a[gen]
-					local right = a[gen+1]
-					if (p1[left] <= p2[left] and p1[right] <= p2[right]
-						and this[left][p1[left]] == right and o[right][p1[right]] == left)
-					then
-						p1[left] = p1[left] + 1
-						p1[right] = p1[right] + 1
-						a[gen] = right
-						a[gen+1] = left
-						result[i] = gen
-						break
-					end
-				end
-			end
-			return result
-		end
-		
-		matrix.remove_line = function(this, l)
-			local n = table.getn(this)
-			if l > n then
-				print("remove_line error, l > n")
-				return
-			end
-			for i = l, n-1 do
-				this[i] = this[i+1]
-			end
-			this[n] = nil
-			n = n-1
-			for i = 1, n do
-				local llen = table.getn(this[i])
-				for j = 1, llen do
-					if this[i][j] == l then
-						for k = j, llen-1 do
-							this[i][k] = this[i][k+1]
-						end
-						this[i][llen] = nil
-						break
-					end
-				end
-			end
-			
-			for i = 1, n do
-				for j = 1, table.getn(this[i]) do
-					if this[i][j] > l then
-						this[i][j] = this[i][j] - 1
-					end
-				end
-			end
-			return this
-		end
-		
-		Omatrices[this] = matrix
-		
-		return matrix
-	end
-	
-	conf.get_polygon_num = function(this, recreate)
-		if not recreate and polygon_nums[this] then
-			return polygon_nums[this]
-		end
-		
-		local s = {int = {max_n = 0}, ext = {max_n = 0}}
-		
-		local function put(t, n)
-			t[n] = (t[n] or 0) + 1
-			--print ("  ", t.max_n, t[n], n)
-			--t.max_n = 8
-			if (t.max_n < n) then
-				t.max_n = n
-			end
-		end
-		
-		local n = {}
-		local is_int = {}	
-		for i = 0, this:get_N() do	
-			n[i] = 0 
-			is_int[i] = false
-		end
-		
-		for i = 1, table.getn(this) do
-			local gen = this[i]
-			n[gen-1] = n[gen-1] + 1
-			n[gen+1] = n[gen+1] + 1
-			--print(n[gen-1], n[gen+1], n[gen]+1)
-			if (is_int[gen] == true) then
-				put(s.int, n[gen]+1)
-			else
-				put(s.ext, n[gen]+1)
-			end
-			n[gen] = 1
-			is_int[gen] = true
-		end
-		for i = 0, this:get_N() do
-			put(s.ext, n[i])
-		end
-		
-		for i = 1, s.ext.max_n do
-			s.ext[i] = s.ext[i] or 0
-		end
-		for i = 1, s.int.max_n do
-			s.int[i] = s.int[i] or 0
-		end
-		
-		setmetatable(s, polygon_num_mt)
-		
-		s.print = function(this)
+	__index = {
+		print = function(this)
 			print("External areas:")
 			for i = 1, this.ext.max_n do
 				print(i, this.ext[i])
@@ -334,94 +78,14 @@ function read_conf_from_table(gens_table)
 			print("\n")
 			return this	
 		end
-		
-		polygon_nums[this] = s
-		
-		return s
-	end
-	
-	conf.get_polygons = function(this)
-		local is_int = {}
-		local a = {}
-		local p = {}
-		local int_polygons = {}
-		local ext_polygons = {}
-
-		for i = 0, this:get_N() do
-			a[i] = i
-			p[i] = {l1 = i, l2 = i + 1, d1 = -1, d2 = -1, l = {}, r = {}, c = i}
-			is_int[i] = false
-		end
-		
-		for i = 1, table.getn(this) do 
-			local gen = this[i]
-			
-			p[gen].e = i
-			table.insert(p[gen].l, i)
-			table.insert(p[gen-1].r, i)
-			table.insert(p[gen+1].l, i)
-			
-			if is_int[gen] then
-				table.insert(int_polygons, p[gen])
-			else
-				table.insert(ext_polygons, p[gen])
-			end
-			p[gen] = {b = i, l = {i}, r = {}}
-			
-			a[gen], a[gen + 1] = a[gen + 1], a[gen]
-			is_int[gen] = true
-		end
-
-		for i = 1, this:get_N() - 1 do
-			p[i].l2 = a[i]
-			p[i].l1 = a[i + 1]
-			p[i].d2 = 1
-			p[i].d1 = 1
-			table.insert(ext_polygons, p[i])
-		end
-		
-		p[0].l1 = a[1]
-		p[0].d1 = 1
-		table.insert(ext_polygons, p[0])
-		
-		p[this:get_N()].l2 = a[this:get_N()]
-		p[this:get_N()].d2 = 1
-		table.insert(ext_polygons, p[this:get_N()])
-		
-		return {ext_polygons = ext_polygons, int_polygons = int_polygons}
-	end
-
-	setmetatable(conf, configuration_mt)
-	
-	--print(N, k)
-	return conf
-end
-
--- in:		string: generators
--- out:	configuration
-function read_conf(gens)
-	local line = gens
-	local conf = {}
-	local _, j = string.find(line, ")")
-	if j then line = string.sub(line, j) end
-	
-	for w in string.gfind(line, "(%d+)%s*") do
-		table.insert(conf, tonumber(w)+1)
-	end
-	return read_conf_from_table(conf)
-end
-
-configuration_mt = {
-	__eq = function (a, b)
-		return a:get_polygon_num() == b:get_polygon_num() and a:get_Omatrix() == b:get_Omatrix()
-	end
+	}
 }
 
-print_matrix = 0
+Omatrix_mt = {}
 
 -- in:		Omatrix: o1, o2; bool: calc_diff
 -- out:	bool: true if equal; int: difference
-function compare_confs(o1, o2, calc_diff)
+Omatrix_mt.compare_confs = function(o1, o2, calc_diff)
 	local n1 = table.getn(o1)
 	local n2 = table.getn(o2)
 	if n1 ~= n2 then return false end
@@ -485,9 +149,6 @@ function compare_confs(o1, o2, calc_diff)
 		return norm(2+d-v)
 	end
 	
-	--print_matrix(o1)
-	--print_matrix(o2)
-
 	-- Возвращает:
 	-- минимальное число различий в поворотах.
 	local function f()
@@ -548,22 +209,366 @@ function compare_confs(o1, o2, calc_diff)
 	return diff == 0, diff
 end
 
-Omatrix_mt = {
-	__eq = compare_confs
-}
-
-polygon_num_mt = {
-	__eq = function (a, b)
-		local function cmp(t1, t2)
-			if (t1.max_n ~= t2.max_n) then return false end
-			for i = 1, t1.max_n do
-				if (t1[i] or 0) ~= (t2[i] or 0) then return false end
+-- Methods
+Omatrix_mt.__index = {
+	print = function(this)
+		for i = 1, table.getn(this) do
+			io.write(string.format("%2d ||%2d)\t", i, this.parallels[i] or 0))
+			for k = 1, table.getn(this[i]) do
+				io.write(string.format("%d\t", this[i][k]))
 			end
-			return true
+			io.write("\n")
 		end
-		return cmp(a.ext, b.ext) and cmp(a.int, b.int)
+		io.write("\n")
+		return this
+	end,
+	
+	get_gens = function(this)
+		local result = {}
+		local p1 = {}
+		local p2 = {}
+		local a = {}
+		local n = table.getn(this)
+		local k = 0
+		for i = 1, n do
+			p1[i] = 1
+			p2[i] = n - 1
+			if this.parallels[i] ~= i then
+				p2[i] = p2[i] - 1
+				k = k + 1
+			end
+			a[i] = i
+		end
+		k = k / 2
+		for i = 1, n*(n-1)/2-k do
+			for gen = 1, n-1 do
+				local left = a[gen]
+				local right = a[gen+1]
+				if (p1[left] <= p2[left] and p1[right] <= p2[right]
+					and this[left][p1[left]] == right and o[right][p1[right]] == left)
+				then
+					p1[left] = p1[left] + 1
+					p1[right] = p1[right] + 1
+					a[gen] = right
+					a[gen+1] = left
+					result[i] = gen
+					break
+				end
+			end
+		end
+		return result
+	end,
+	
+	remove_line = function(this, l)
+		local n = table.getn(this)
+		if l > n then
+			print("remove_line error, l > n")
+			return
+		end
+		for i = l, n-1 do
+			this[i] = this[i+1]
+		end
+		this[n] = nil
+		n = n-1
+		for i = 1, n do
+			local llen = table.getn(this[i])
+			for j = 1, llen do
+				if this[i][j] == l then
+					for k = j, llen-1 do
+						this[i][k] = this[i][k+1]
+					end
+					this[i][llen] = nil
+					break
+				end
+			end
+		end
+		
+		for i = 1, n do
+			for j = 1, table.getn(this[i]) do
+				if this[i][j] > l then
+					this[i][j] = this[i][j] - 1
+				end
+			end
+		end
+		return this
 	end
 }
+
+Omatrix_mt.__eq = Omatrix_mt.compare_confs
+
+configuration_mt = {
+	-- Methods
+	__index = {
+		get_N = function(this)
+			return configurations[this].N
+		end,
+		
+		get_k = function(this)
+			return configurations[this].k
+		end,
+		
+		get_s = function(this)
+			return configurations[this].s
+		end,
+		
+		print_gens = function(this)
+			for i, k in ipairs(this) do
+				io.write(string.format("%d ",k-1))
+			end
+			io.write("\n")	
+		end,
+		
+		print = function(this) 
+			this:print_gens()
+			
+			print("N = ", configurations[this].N)
+			print("k = ", configurations[this].k)
+			print("s = ", configurations[this].s)
+		end,
+
+		get_Omatrix_indexed = function(this)
+			local matrix = {}
+			local lines = {}
+			local positions = {}
+			for i = 1, this:get_N() do
+				matrix[i] = {}
+				lines[i] = i
+			end
+			for i = 1, table.getn(this) do
+				local gen = this[i]
+				local first = lines[gen]
+				local second = lines[gen+1]
+				
+				table.insert(matrix[first], i)
+				table.insert(matrix[second], i)
+				lines[gen] = second;
+				lines[gen+1] = first;
+			end
+			return matrix
+		end,
+		
+		get_Omatrix = function(this, recreate)
+			if not recreate and Omatrices[this] then
+				return Omatrices[this]
+			end
+
+			local matrix = {}
+			local lines = {}
+			local positions = {}
+			matrix.parallels = {}
+			for i = 1, this:get_N() do
+				matrix[i] = {}
+				lines[i] = i
+				positions[i] = 0
+				matrix.parallels[i] = i
+			end
+			for i = 1, table.getn(this) do
+				local gen = this[i]
+				local first = lines[gen]
+				local second = lines[gen+1]
+				positions[first] = positions[first] + 1
+				positions[second] = positions[second] + 1
+				
+				matrix[first][positions[first]] = second;
+				lines[gen] = second;
+				
+				matrix[second][positions[second]] = first;
+				lines[gen+1] = first;
+			end
+			for i = 1, this:get_N()-1 do
+				if lines[i] < lines[i+1] then
+					matrix.parallels[lines[i]] = lines[i+1]
+					matrix.parallels[lines[i+1]] = lines[i]
+				end
+			end
+			--[[for i = 1, this:get_N() do
+				for j, v in ipairs(matrix[i]) do
+					matrix[i][j] = matrix[i][j] - i
+					if matrix[i][j] < 0 then
+						matrix[i][j] = matrix[i][j] + this:get_N()
+					end
+				end
+			end]]
+			setmetatable(matrix, Omatrix_mt)
+			
+			Omatrices[this] = matrix
+			
+			return matrix
+		end,
+		
+		get_polygon_num = function(this, recreate)
+			if not recreate and polygon_nums[this] then
+				return polygon_nums[this]
+			end
+			
+			local s = {int = {max_n = 0}, ext = {max_n = 0}}
+			
+			local function put(t, n)
+				t[n] = (t[n] or 0) + 1
+				--print ("  ", t.max_n, t[n], n)
+				--t.max_n = 8
+				if (t.max_n < n) then
+					t.max_n = n
+				end
+			end
+			
+			local n = {}
+			local is_int = {}	
+			for i = 0, this:get_N() do	
+				n[i] = 0 
+				is_int[i] = false
+			end
+			
+			for i = 1, table.getn(this) do
+				local gen = this[i]
+				n[gen-1] = n[gen-1] + 1
+				n[gen+1] = n[gen+1] + 1
+				--print(n[gen-1], n[gen+1], n[gen]+1)
+				if (is_int[gen] == true) then
+					put(s.int, n[gen]+1)
+				else
+					put(s.ext, n[gen]+1)
+				end
+				n[gen] = 1
+				is_int[gen] = true
+			end
+			for i = 0, this:get_N() do
+				put(s.ext, n[i])
+			end
+			
+			for i = 1, s.ext.max_n do
+				s.ext[i] = s.ext[i] or 0
+			end
+			for i = 1, s.int.max_n do
+				s.int[i] = s.int[i] or 0
+			end
+			
+			setmetatable(s, polygon_num_mt)
+
+			polygon_nums[this] = s
+			
+			return s
+		end,
+		
+		get_polygons = function(this)
+			local is_int = {}
+			local a = {}
+			local p = {}
+			local int_polygons = {}
+			local ext_polygons = {}
+
+			for i = 0, this:get_N() do
+				a[i] = i
+				p[i] = {l1 = i, l2 = i + 1, d1 = -1, d2 = -1, l = {}, r = {}, c = i}
+				is_int[i] = false
+			end
+			
+			for i = 1, table.getn(this) do 
+				local gen = this[i]
+				
+				p[gen].e = i
+				table.insert(p[gen].l, i)
+				table.insert(p[gen-1].r, i)
+				table.insert(p[gen+1].l, i)
+				
+				if is_int[gen] then
+					table.insert(int_polygons, p[gen])
+				else
+					table.insert(ext_polygons, p[gen])
+				end
+				p[gen] = {b = i, l = {i}, r = {}}
+				
+				a[gen], a[gen + 1] = a[gen + 1], a[gen]
+				is_int[gen] = true
+			end
+
+			for i = 1, this:get_N() - 1 do
+				p[i].l2 = a[i]
+				p[i].l1 = a[i + 1]
+				p[i].d2 = 1
+				p[i].d1 = 1
+				table.insert(ext_polygons, p[i])
+			end
+			
+			p[0].l1 = a[1]
+			p[0].d1 = 1
+			table.insert(ext_polygons, p[0])
+			
+			p[this:get_N()].l2 = a[this:get_N()]
+			p[this:get_N()].d2 = 1
+			table.insert(ext_polygons, p[this:get_N()])
+			
+			return {ext_polygons = ext_polygons, int_polygons = int_polygons}
+		end
+	},
+	
+	__eq = function (a, b)
+		return a:get_polygon_num() == b:get_polygon_num() and a:get_Omatrix() == b:get_Omatrix()
+	end
+}
+
+-----------------------------------[MAIN FUNCTIONS]-------------------------------------------------
+
+-- in:		string: filename; string: end generators
+-- out:		array of the configurations
+function load_confs(filename, end_gens)
+	io.input(filename)
+	local confs = {}
+	while true do
+		local line = io.read()
+		if line == nil then break end
+		if end_gens then
+			line = line .. " " .. end_gens
+		end
+		table.insert(confs, read_conf(line))
+    end
+	return confs
+end
+
+-- in:		array of generators
+-- out:		configuration
+function read_conf_from_table(gens_table)
+	local conf = {}
+	for i = 1, table.getn(gens_table) do
+		conf[i] = gens_table[i]
+	end
+	
+	configurations[conf] = {N = 0, k = 0}
+	max_gen = conf[1]
+	for _, w in ipairs(conf) do
+		if max_gen < w then max_gen = w end
+	end
+	local N = max_gen + 1
+	local k = N*(N-1)/2 - table.getn(conf)
+	configurations[conf].N = N
+	configurations[conf].k = k
+	
+	local s = - 1 + (N % 2);
+	for i, k in ipairs(conf) do
+		s = s - ((k-1) % 2)*2 + 1;
+	end
+	if s < 0 then s = -s end
+	configurations[conf].s = s
+		
+	setmetatable(conf, configuration_mt)
+	
+	--print(N, k)
+	return conf
+end
+
+-- in:		string: generators
+-- out:	configuration
+function read_conf(gens)
+	local line = gens
+	local conf = {}
+	local _, j = string.find(line, ")")
+	if j then line = string.sub(line, j) end
+	
+	for w in string.gfind(line, "(%d+)%s*") do
+		table.insert(conf, tonumber(w)+1)
+	end
+	return read_conf_from_table(conf)
+end
 
 function load_bgr(filename)
 	local big_gr = {}
