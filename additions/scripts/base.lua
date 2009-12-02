@@ -86,48 +86,17 @@ Omatrix_mt = {}
 -- in:		Omatrix: o1, o2; bool: calc_diff
 -- out:	bool: true if equal; int: difference
 Omatrix_mt.compare_confs = function(o1, o2, calc_diff)
-	local n1 = table.getn(o1)
-	local n2 = table.getn(o2)
-	if n1 ~= n2 then return false end
-	local function norm(v)
-		v = math.fmod(v+2*n1, n1)
-		if v == 0 then v = n1 end
-		return v
-	end
-	local function norm2(v)
-		v = math.fmod(v+2*n1, 2*n1)
-		if v == 0 then v = 2*n1 end
-		return v
-	end	
-	local function get_val(offset, i, j)
-		local val
-		if norm2(i + offset) <= n1 then 
-			val = o2[norm2(i + offset)][j]
-		else 
-			local line = norm(i+offset)
-			if (o2.parallels[line]) then line = o2.parallels[line] end
-			val = o2[line][table.getn(o2[line])-j+1]
-		end
-		if ((offset <= n1 and val > offset) or (offset > n1 and val <= norm(offset))) then return norm(val - offset) end
-		if (o2.parallels[val]) then val = o2.parallels[val] end
-		val = val - offset
-		return norm(val)
-	end
-	local function get_line_len(l)
-		return table.getn(o2[norm(l)])
-	end
-	
 	--  Выводит Число различий между элементами Оматрицами в определенном повороте
-	local function cmp_offset(offset)
+	local function cmp_rotation(rotation)
 		local diff = 0;
 
-		for i = 1, n1 do
-			if (table.getn(o1[i]) ~= get_line_len(offset+i)) then
+		for i = 1, o1.n do
+			if (table.getn(o1[i]) ~= o2:get_line_len(i, rotation)) then
 				return 100000
 			end
 			
 			for j = 1, table.getn(o1[i]) do
-				if o1[i][j] ~= get_val(offset, i, j) then 
+				if o1[i][j] ~= o2:get_val(rotation, i, j) then 
 					diff = diff + 1
 					if not calc_diff then 
 						return 1
@@ -139,33 +108,14 @@ Omatrix_mt.compare_confs = function(o1, o2, calc_diff)
 		return diff
 	end
 
-	local function convert_n2o(v, d)
-		v = norm2(2+d-v)
-		if v > n1 then return o1.parallels[v-n1] end
-		return v
-	end
-	local function convert_o2n(v, d)
-		if v > d + 1 then v = o1.parallels[v] + n1 end
-		return norm(2+d-v)
-	end
-	
 	-- Возвращает:
 	-- минимальное число различий в поворотах.
 	local function f()
 		local diff, min_diff;
-		min_diff = n1*n1*2
-		for i = 0, 2*n1-1 do
-			if o2.parallels[norm(i)] <= norm(i) then
-				--[[print("i = ", i)
-				for j = 1, n1 do
-					for k = 1, get_line_len(j+i) do
-						io.write(string.format("%2d ", get_val(i, j, k)))
-					end
-					print("")
-				end --]]
-				diff = cmp_offset(i)
---[[				if calc_diff then
-				end--]]
+		min_diff = o1.n*o1.n*2
+		for i = 0, 2*o1.n-1 do
+			if o2:check_rotation(i) then
+				diff = cmp_rotation(i)
 				min_diff = (diff < min_diff) and diff or min_diff
 				if diff == 0 then
 					return 0
@@ -176,31 +126,12 @@ Omatrix_mt.compare_confs = function(o1, o2, calc_diff)
 	end
 
 	local diff = f()
---	if res then return res, diff end
+
 	if diff == 0 then
 		return true, 0
 	end
 
-	o = {}
-	o[1] = {}
-	local d = 0
-	if (o1.parallels[1] ~= 1) then d = 1 o[2] = {} end
-	for j = 1, table.getn(o1[convert_n2o(1, d)]) do
-			o[1][j] = convert_o2n(o1[convert_n2o(1, d)][j], d)
-			if d == 1 then
-				o[2][j] = convert_o2n(o1[convert_n2o(2, d)][j], d)
-			end
-	end
-	for i = 2+d, n1 do
-		o[i] = {}
-		local ind = convert_n2o(i, d)
-		local len = table.getn(o1[ind])
-		for j = 1, len do
-			o[i][j] = convert_o2n(o1[ind][len - j + 1], d)
-		end
-	end
-	o.parallels = o1.parallels
-	o1 = o
+	o1 = o1:get_reflected()
 
 	local diff2 = f()
 	if diff > diff2 then
@@ -211,6 +142,76 @@ end
 
 -- Methods
 Omatrix_mt.__index = {
+	norm = function(this, v)
+		return (v + this.n_2 - 1) % this.n + 1
+	end,
+	
+	norm2 = function(this, v)
+		return (v + this.n_2 - 1) % this.n_2 + 1
+	end,
+	
+	get_val = function(this, rotation, i, j)
+		local val
+		if this:norm2(i + rotation) <= this.n then 
+			val = this[this:norm2(i + rotation)][j]
+		else 
+			local line = this:norm(i+rotation)
+			if (this.parallels[line]) then line = this.parallels[line] end
+			val = this[line][table.getn(this[line])-j+1]
+		end
+		if ((rotation <= this.n and val > rotation) or (rotation > this.n and val <= this:norm(rotation))) then
+			return this:norm(val - rotation)
+		end
+		if (this.parallels[val]) then val = this.parallels[val] end
+		val = val - rotation
+		return this:norm(val)
+	end,
+	
+	get_line_len = function(this, l, rotation)
+		return table.getn(this[this:norm(l + rotation)])
+	end,
+	
+	get_reflected = function(this)
+		local function convert_n2o(v, d)
+			v = this:norm2(2+d-v)
+			if v > this.n then return this.parallels[v-this.n] end
+			return v
+		end
+		
+		local function convert_o2n(v, d)
+			if v > d + 1 then v = this.parallels[v] + this.n end
+			return this:norm(2+d-v)
+		end
+		
+		local o = {}
+		o[1] = {}
+		local d = 0
+		if (this.parallels[1] ~= 1) then d = 1 o[2] = {} end
+		for j = 1, table.getn(this[convert_n2o(1, d)]) do
+				o[1][j] = convert_o2n(this[convert_n2o(1, d)][j], d)
+				if d == 1 then
+					o[2][j] = convert_o2n(this[convert_n2o(2, d)][j], d)
+				end
+		end
+		for i = 2+d, this.n do
+			o[i] = {}
+			local ind = convert_n2o(i, d)
+			local len = table.getn(this[ind])
+			for j = 1, len do
+				o[i][j] = convert_o2n(this[ind][len - j + 1], d)
+			end
+		end
+		
+		o.n = this.n
+		o.n_2 = this.n_2
+		setmetatable(o, Omatrix_mt)
+		return o
+	end,
+	
+	check_rotation = function(this, rotation)
+		return this.parallels[this:norm(rotation)] <= this:norm(rotation)
+	end,
+	
 	print = function(this)
 		for i = 1, table.getn(this) do
 			io.write(string.format("%2d ||%2d)\t", i, this.parallels[i] or 0))
@@ -228,7 +229,7 @@ Omatrix_mt.__index = {
 		local p1 = {}
 		local p2 = {}
 		local a = {}
-		local n = table.getn(this)
+		local n = this.n
 		local k = 0
 		for i = 1, n do
 			p1[i] = 1
@@ -260,7 +261,7 @@ Omatrix_mt.__index = {
 	end,
 	
 	remove_line = function(this, l)
-		local n = table.getn(this)
+		local n = this.n
 		if l > n then
 			print("remove_line error, l > n")
 			return
@@ -389,6 +390,10 @@ configuration_mt = {
 					end
 				end
 			end]]
+			
+			matrix.n = this:get_N()
+			matrix.n_2 = matrix.n*2
+			
 			setmetatable(matrix, Omatrix_mt)
 			
 			Omatrices[this] = matrix
