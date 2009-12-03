@@ -20,11 +20,15 @@ configuration {
 
 	print()
 
+	get_Omatrix_indexed()
+	
 	out:		Omatrix
 	get_Omatrix()
 
 	out:		poligon_num
 	get_polygon_num()
+	
+	get_polygons()
 	
 	operator ==
 }
@@ -39,6 +43,37 @@ Omatrix {
 	in:			int: line number to remove
 	out:		this
 	remove_line(l)
+	
+	in: 	int: rotation
+	in: 	int: i, j - position
+	out: 	int: value
+	get_val(rotation, i, j)
+	
+	in:		int: l - line number
+	in:		int: rotation
+	out:	int: line lenght
+	get_line_len(l, rotation)
+	
+	out: reflected Omatrix
+	get_reflected()
+	
+	in:		int: rotation
+	out:	bool: can this Omatrix be rotated
+	check_rotation(rotation)
+	
+	in:		int: m
+	out:	bool:
+	check_cm(m)
+	
+	out:	true, m
+	out:	false
+	check_all_cm()
+	
+	out:	bool
+	check_d2()
+	
+	out:	nil or string
+	check_sym()
 	
 	operator ==
 }
