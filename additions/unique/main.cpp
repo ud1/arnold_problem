@@ -1,6 +1,24 @@
 #include <stdio.h>
 #include <sstream>
 #include <vector>
+#include <map>
+
+long crc_table[256];
+
+void Crc32_init() {
+	
+	long crc; 
+	int i, j;
+
+	for (i = 0; i < 256; i++)
+	{
+		crc = i;
+		for (j = 0; j < 8; j++)
+			crc = crc & 1 ? (crc >> 1) ^ 0xEDB88320UL : crc >> 1;
+
+		crc_table[i] = crc;
+	};
+}
 
 class polygon_num {
 	friend class Configuration;
@@ -222,6 +240,7 @@ public:
 
 		calc_Omatrix(o);
 		calc_polygon_num(p_num);
+		calc_hash();
 	}
 
 	int get_N() {
@@ -261,6 +280,10 @@ public:
 
 	const polygon_num &get_polygon_num() const {
 		return p_num;
+	}
+
+	long get_hash() {
+		return hash;
 	}
 
 protected:
@@ -358,12 +381,30 @@ protected:
 		delete []s_ext;
 	}
 
+	void calc_hash() {
+		long crc = 0xFFFFFFFFUL;
+
+		char *buf = (char *) p_num.internal;
+		int len = (p_num.i_max+1)*sizeof(int);
+		while (len--) 
+			crc = crc_table[(crc ^ *buf++) & 0xFF] ^ (crc >> 8);
+
+		buf = (char *) p_num.external;
+		len = (p_num.e_max+1)*sizeof(int);
+		while (len--) 
+			crc = crc_table[(crc ^ *buf++) & 0xFF] ^ (crc >> 8);
+
+		hash = crc ^ 0xFFFFFFFFUL;
+	}
+
 	Omatrix o;
 	polygon_num p_num;
 
 	int N, k;
 	int *gens;
 	int gens_n;
+
+	long hash;
 };
 
 int main(int argc, char **argv) {
@@ -377,8 +418,10 @@ int main(int argc, char **argv) {
 	if (!fout)
 		return 0;
 
+	Crc32_init();
+
 	char str[2048];
-	std::vector<Configuration *> confs;
+	std::multimap<long, Configuration *> confs;
 
 	while (fgets(str, 1024, fin) > 0) {
 		if (!str[0])
@@ -386,15 +429,17 @@ int main(int argc, char **argv) {
 		Configuration *conf = new Configuration;
 		conf->set_gens(str);
 
-		std::vector<Configuration *>::iterator it = confs.begin();
+		std::multimap<long, Configuration *>::iterator it, itlow, itup;
+		itlow = confs.lower_bound(conf->get_hash());
+		itup = confs.upper_bound(conf->get_hash());
 
-		for (; it != confs.end(); ++it) {
-			if (*(*it) == *conf)
+		for (it = itlow; it != itup; ++it) {
+			if (*(it->second) == *conf)
 				break;
 		}
 
-		if (it == confs.end()) {
-			confs.push_back(conf);
+		if (it == itup) {
+			confs.insert(std::make_pair(conf->get_hash(), conf));
 			conf->print_gens(fout);
 		} else {
 			delete conf;
