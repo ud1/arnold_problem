@@ -162,7 +162,7 @@ public:
 
 	bool operator == (const Omatrix &o2) const {
 		for (int i = 0; i < N2; ++i) {
-			if (check_rotation(i)) {
+			if (o2.check_rotation(i)) {
 				if (cmp_rotation(o2, i))
 					return true;
 			}
@@ -170,7 +170,7 @@ public:
 		Omatrix o1;
 		get_reflected(o1);
 		for (int i = 0; i < N2; ++i) {
-			if (o1.check_rotation(i)) {
+			if (o2.check_rotation(i)) {
 				if (o1.cmp_rotation(o2, i))
 					return true;
 			}
