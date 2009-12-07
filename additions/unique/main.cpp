@@ -2,6 +2,7 @@
 #include <sstream>
 #include <vector>
 #include <map>
+#include <cassert>
 
 long crc_table[256];
 
@@ -446,10 +447,11 @@ int main(int argc, char **argv) {
 		}
 
 		static int cnt = 0;
+		++cnt;
 		if (cnt % 10000 == 0) {
+			fflush(fout);
 			printf("%d\n", cnt);
 		}
-		++cnt;
 	}
 	fclose(fin);
 	fclose(fout);
