@@ -110,6 +110,10 @@ polygon_num_mt = {
 			for i = 1, this.int.max_n do
 				print(i, this.int[i])
 			end
+			print("Sum:")
+			for i = 3, this.int.max_n+2 do
+				print(i, (this.int[i] or 0) + (this.ext[i-2] or 0))
+			end
 			print("\n")
 			return this	
 		end
@@ -243,6 +247,82 @@ Omatrix_mt.__index = {
 		return o
 	end,
 	
+	-- val = 1..n
+	rotate_sphere = function(this, val)
+		local new_o = {}
+		new_o.parallels = {}
+		new_o.n = this.n
+		new_o.n_2 = this.n_2
+		
+		for i = 1, this.n do
+			new_o[i] = {}
+			new_o.parallels[i] = i
+		end
+		
+		local x = this.n + 1
+		local reord = {}
+		reord[x] = this.n
+		for i = 1, this.n - 1 do
+			reord[this[val][i]] = i
+		end
+		
+		local temp = {}
+		temp[x] = {}
+		for i = 1, this.n do
+			temp[x][i] = i
+		end
+		for i = 1, this.n do
+			temp[i] = {}
+			for j = 1, this.n - 1 do
+				temp[i][j] = this[i][j]
+			end
+			temp[i][this.n] = x
+		end
+		
+		for i = 1, this.n do
+			local v = temp[val][i]
+			local line_pos = 1
+			if v < val then
+				local val_pos
+				for j = 1, this.n do
+					if temp[v][j] == val then
+						val_pos = j
+						break
+					end
+				end
+				for j = val_pos - 1, 1, -1 do
+					new_o[i][line_pos] = reord[temp[v][j]]
+					line_pos = line_pos + 1
+				end
+				
+				for j = this.n, val_pos + 1, -1 do
+					new_o[i][line_pos] = reord[temp[v][j]]
+					line_pos = line_pos + 1
+				end
+			else
+				local val_pos
+				for j = 1, this.n do
+					if temp[v][j] == val then
+						val_pos = j
+						break
+					end
+				end
+				for j = val_pos + 1, this.n do
+					new_o[i][line_pos] = reord[temp[v][j]]
+					line_pos = line_pos + 1
+				end
+				
+				for j = 1, val_pos - 1 do
+					new_o[i][line_pos] = reord[temp[v][j]]
+					line_pos = line_pos + 1
+				end
+			end
+		end
+		
+		setmetatable(new_o, Omatrix_mt)
+		return new_o
+	end,
+	
 	check_rotation = function(this, rotation)
 		return this.parallels[this:norm(rotation)] <= this:norm(rotation)
 	end,
@@ -363,7 +443,7 @@ Omatrix_mt.__index = {
 				local left = a[gen]
 				local right = a[gen+1]
 				if (p1[left] <= p2[left] and p1[right] <= p2[right]
-					and this[left][p1[left]] == right and o[right][p1[right]] == left)
+					and this[left][p1[left]] == right and this[right][p1[right]] == left)
 				then
 					p1[left] = p1[left] + 1
 					p1[right] = p1[right] + 1
