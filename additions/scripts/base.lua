@@ -88,6 +88,60 @@ poligon_num {
 --]]
 
 -----------------------------------[METATABLES]-------------------------------------------------
+cmatrix_mt = {
+	__index = {
+		init = function(this, n)
+			this.n = n
+			this.m = {}
+			for l = 1, n do
+				this.m[l] = {}
+				for i = 1, l - 1 do
+					this.m[l][i] = " "
+				end
+			end
+		end,
+		
+		apply_gen = function(this, gen)
+			this.m[gen+1][gen] = (gen % 2 == 0 and "1" or "0")
+			for i = 1, gen - 1 do
+				local temp = this.m[gen][i]
+				this.m[gen][i] = this.m[gen + 1][i]
+				this.m[gen + 1][i] = temp
+			end
+			
+			for i = gen + 2, this.n do
+				local temp = this.m[i][gen]
+				this.m[i][gen] = this.m[i][gen+1]
+				this.m[i][gen+1] = temp
+			end
+		end,
+		
+		print = function(this)
+			for i = 1, this.n + 2 do
+				io.write("-")
+			end
+			io.write("\n")
+			
+			for l = 1, this.n do
+				io.write("|")
+				for i = 1, l - 1 do
+					io.write(this.m[l][i])
+				end
+				for i = l, this.n do
+					io.write(" ")
+				end
+				io.write("|\n")
+			end
+			for i = 1, this.n + 2 do
+				io.write("-")
+			end
+			io.write("\n")
+			
+			return this
+		end
+	}
+}
+
 polygon_num_mt = {
 	__eq = function (a, b)
 		local function cmp(t1, t2)
