@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <sys/time.h>
+#include<signal.h>
 
 // May vary
 #define n1 39
@@ -9,6 +11,8 @@
 // #define DEBUG 1
 
 int n;
+
+int level = 0;
 
 typedef struct {
     int generator;
@@ -28,22 +32,53 @@ int max_s = 0, max_defects = 0;
 char filename[80] = "";
 int full = 0;
 
-struct timeval start, end;
+struct timeval start;
+
+double last_signal = -10.0;
+
+void handle_signal(int sig) {
+    struct timeval end;
+
+    gettimeofday(&end, NULL);
+    double time_taken = end.tv_sec + end.tv_usec / 1e6 -
+        start.tv_sec - start.tv_usec / 1e6; // in seconds
+
+    printf("\n [%f] level = %d/%d", time_taken, level, b_free);
+    printf("\n");
+    for (int i = 0; i < level; i++) {
+        if (stat[i].generator % 2) {
+            continue;
+        }
+        printf("%.*s", stat[i].generator, "                            ");
+        printf(" %d \n", stat[i].generator);
+    }
+
+    printf("\n");
+
+    if (time_taken - last_signal < 1) {
+        exit(0);
+    }
+
+    last_signal = time_taken;
+}
 
 void count_gen(int level) {
+    struct timeval end;
+
     int s, i, max_defects1;
     FILE* f;
 
     s = -1 + (n & 1); // Поправка от избытка во внешней области
-//    s -= n / 2; // Вклад от начальных генераторов
 
     for (i = 0; i < level; i++) {
         s -= (stat[i].generator & 1) * 2 - 1;
     }
-    if (s < 0)
+    if (s < 0) {
         s = -s;
-    if (s < max_s || !full && s == max_s)
+    }
+    if (s < max_s || !full && s == max_s) {
         return;
+    }
 
     max_s = s;
     max_defects1 = ((n * (n + 1) / 2 - 3) - 3 * max_s) / 2;
@@ -91,7 +126,7 @@ void count_gen(int level) {
 void inline set(int generator, int cross_direction) {
     int i;
 
-//    b_free += -2 * cross_direction + 1; // Корректируем кол-во оставшихся генераторов
+    //    b_free += -2 * cross_direction + 1; // Корректируем кол-во оставшихся генераторов
 
     i = a[generator];
     a[generator] = a[generator + 1];
@@ -126,12 +161,11 @@ void inline do_uncross(int level, int generator) {
     // d[generator + 1] = stat[level + 1].prev_polygon_cnt;
 }
 
+// Стратегия перебора -2, +2, +4 ...
+
 int inline should_process(int cur_gen, int prev_gen) {
-    // Пример: если предыдущий генератор 2, заканчивать надо на 4
 
-    int k = cur_gen != prev_gen + 2 && !(cur_gen == prev_gen && prev_gen + 3 == n);
-
-    // printf("->>>>>>>>>>>>>>> desicion = %d, cur_gen = %d prev_gen = %d\n", k, cur_gen, prev_gen);
+    int k = cur_gen < n - 3;
 
     return k;
 }
@@ -139,26 +173,82 @@ int inline should_process(int cur_gen, int prev_gen) {
 void inline modify_generator(int* cur_gen, int prev_gen) {
     // Пример: предыдущий генератор 2. Инициализируем 2, сразу вычитаем, получаем 0
     // Следующим шагом инкрементим до максимума и вычитаем.
-    if (*cur_gen == -100) {
-        *cur_gen =  (prev_gen > 0) ? prev_gen - 2 : n - 3;
-        return ;
+    *cur_gen += 2;
+
+    if (*cur_gen < 0) {
+        *cur_gen += 2;
     }
 
-    if (*cur_gen + 2 == prev_gen) {
-        *cur_gen =  n - 3;
-        return;
+    if (*cur_gen == prev_gen) {
+        *cur_gen += 2;
     }
-
-    *cur_gen -= 2;
 }
 
-int inline init_working_gen() {
-    return -100;
+int inline init_working_gen(int generator) {
+    return generator - 4;
 }
+
+int inline init_skip_gen(int curr_generator) {
+    return curr_generator + 2; // todo
+}
+
+// Стратегия перебора -2, n-3, n-5 ...
+// int inline should_process(int cur_gen, int prev_gen) {
+//     // Пример: если предыдущий генератор 2, заканчивать надо на 4
+//     int k = cur_gen != prev_gen + 2 && !(cur_gen == prev_gen && prev_gen + 3 == n);
+//     // printf("->>>>>>>>>>>>>>> desicion = %d, cur_gen = %d prev_gen = %d\n", k, cur_gen, prev_gen);
+//
+//     return k;
+// }
+//
+// void inline modify_generator(int* cur_gen, int prev_gen) {
+//     // Пример: предыдущий генератор 2. Инициализируем 2, сразу вычитаем, получаем 0
+//     // Следующим шагом инкрементим до максимума и вычитаем.
+//     if (*cur_gen == -100) {
+//         *cur_gen =  (prev_gen > 0) ? prev_gen - 2 : n - 3;
+//         return ;
+//     }
+//
+//     if (*cur_gen + 2 == prev_gen) {
+//         *cur_gen =  n - 3;
+//         return;
+//     }
+//
+//     *cur_gen -= 2;
+// }
+//
+// int inline init_working_gen(int generator) {
+//     return -100;
+// }
+//
+// int inline init_skip_gen(int curr_generator) {
+//     return curr_generator + 2;
+// }
+
+// Стратегия перебора от большего к меньшему
+// int inline should_process(int cur_gen, int prev_gen) {
+//     return cur_gen > prev_gen - 2 && cur_gen > 0 ;
+// }
+
+// void inline modify_generator(int* cur_gen, int prev_gen) {
+//     *cur_gen -= 2;
+//     if (*cur_gen == prev_gen) {
+//         *cur_gen -= 2;
+//     }
+// }
+
+// int inline init_working_gen(int generator) {
+//     return n - 1;
+// }
+
+// int inline init_skip_gen(int curr_generator) {
+//     return 0;
+// }
 
 // Calculations for defectless configurations
-void calc(int level) {
+void calc() {
     int curr_generator, start_level;
+//    int level = 0;
 
     max_s = 0;
 
@@ -175,7 +265,7 @@ void calc(int level) {
 
     start_level = level;
 
-    stat[level].generator = n - 1; // завышенное несуществующее значение, будет уменьшаться
+    stat[level].generator = init_working_gen(n-3); // завышенное несуществующее значение, будет уменьшаться
     stat[level].var = 0;
 
     while (1) {
@@ -194,33 +284,27 @@ void calc(int level) {
 
 
             if (curr_generator != 0) {
-
                 if (a[curr_generator - 1] > a[curr_generator + 1]) {
-                    // printf("no-4\n");
                     continue;
                 }
 
                 if (a[curr_generator] > a[curr_generator + 2]) {
-                    // printf("no-3\n");
                     continue;
                 }
-
-
             }
             else {
                 // Нулевой генератор может пересечь только первую и последнюю прямые
-                if (a[curr_generator] != 0 || a[curr_generator + 1] != n - 1) {
-                    // printf("no-2\n");
+                if (a[curr_generator + 1] != n - 1) {
+                    continue;
+                }
+                if (a[curr_generator] != 0) {
                     continue;
                 }
             }
 
             if (a[curr_generator] > a[curr_generator + 1]) {
-                // printf("no-1\n");
                 continue;
             }
-
-
 
             // Optimization
             // Запрещаем белые треугольники и квадраты (хотя треугольники запрещены автопостроением черных треугольников)
@@ -231,13 +315,13 @@ void calc(int level) {
 
             do_cross(level, curr_generator);
             level++;
-//            stat[level].var = curr_generator;
+            // stat[level].var = curr_generator;
 
             if (curr_generator != 0) {
                 stat[level].generator = curr_generator - 1;
                 do_cross(level, curr_generator - 1);
                 level++;
-//                stat[level].var = curr_generator;
+                // stat[level].var = curr_generator;
             }
 
             stat[level].generator = curr_generator + 1;
@@ -252,10 +336,10 @@ void calc(int level) {
                 printf("count-gen\n");
 #endif
 
-                stat[level].generator = curr_generator + 2; // перебора не будет, чтобы вернуться
+                stat[level].generator = init_skip_gen(curr_generator); // перебора не будет, чтобы вернуться
             }
             else {
-                stat[level].generator = init_working_gen(); // запускаем перебор заново на другом уровне
+                stat[level].generator = init_working_gen(curr_generator); // запускаем перебор заново на другом уровне
             }
         }
         else {
@@ -297,6 +381,8 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    signal(SIGINT, handle_signal);
+
     for (i = 1; i < argc; i++) {
         strcpy(s, argv[i]);
         if (0 == strcmp("-n", s))
@@ -325,7 +411,7 @@ int main(int argc, char** argv) {
     }
 
     gettimeofday(&start, NULL);
-    calc(0);
+    calc();
 
     printf("---------->>> Process terminated.\n");
 
