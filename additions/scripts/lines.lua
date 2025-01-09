@@ -5,6 +5,7 @@ additional_gens = os.getenv("ADDITIONAL_GENS")
 filename = os.getenv("CONF_FILE")
 do_not_extract_tdc = os.getenv("DO_NOT_EXTRACT_TDC")
 
+print("#FILE", filename)
 
 if not do_not_extract_tdc then
 	io.input(filename)
@@ -17,6 +18,11 @@ if not do_not_extract_tdc then
 			line = line .. " " .. additional_gens
 		end
 		local conf = read_conf(line)
+        
+        conf:get_Omatrix():print();
+        conf:get_Omatrix():rotate_sphere(1):print();
+        conf:get_Omatrix():rotate_sphere(2):print();
+        conf:get_Omatrix():rotate_sphere(3):print();
 		
 
 		local flag = false
@@ -30,7 +36,7 @@ if not do_not_extract_tdc then
 		if not flag then
 			table.insert(confs, conf)
 			if (verbose) then
-				print("\nconf #", table.getn(confs))
+				print("\nconf #", #confs)
 				conf:print()
 				conf:get_polygon_num():print()
 			else

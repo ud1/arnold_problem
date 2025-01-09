@@ -184,11 +184,11 @@ Omatrix_mt.compare_confs = function(o1, o2, calc_diff)
 		local diff = 0;
 
 		for i = 1, o1.n do
-			if (table.getn(o1[i]) ~= o2:get_line_len(i, rotation)) then
+			if (#o1[i] ~= o2:get_line_len(i, rotation)) then
 				return 100000
 			end
 			
-			for j = 1, table.getn(o1[i]) do
+			for j = 1, #o1[i] do
 				if o1[i][j] ~= o2:get_val(rotation, i, j) then 
 					diff = diff + 1
 					if not calc_diff then 
@@ -250,7 +250,7 @@ Omatrix_mt.__index = {
 		else 
 			local line = this:norm(i+rotation)
 			if (this.parallels[line]) then line = this.parallels[line] end
-			val = this[line][table.getn(this[line])-j+1]
+			val = this[line][#this[line]-j+1]
 		end
 		if ((rotation <= this.n and val > rotation) or (rotation > this.n and val <= this:norm(rotation))) then
 			return this:norm(val - rotation)
@@ -261,7 +261,7 @@ Omatrix_mt.__index = {
 	end,
 	
 	get_line_len = function(this, l, rotation)
-		return table.getn(this[this:norm(l + rotation)])
+		return #this[this:norm(l + rotation)]
 	end,
 	
 	get_reflected = function(this)
@@ -280,7 +280,7 @@ Omatrix_mt.__index = {
 		o[1] = {}
 		local d = 0
 		if (this.parallels[1] ~= 1) then d = 1 o[2] = {} end
-		for j = 1, table.getn(this[convert_n2o(1, d)]) do
+		for j = 1, #this[convert_n2o(1, d)] do
 				o[1][j] = convert_o2n(this[convert_n2o(1, d)][j], d)
 				if d == 1 then
 					o[2][j] = convert_o2n(this[convert_n2o(2, d)][j], d)
@@ -289,7 +289,7 @@ Omatrix_mt.__index = {
 		for i = 2+d, this.n do
 			o[i] = {}
 			local ind = convert_n2o(i, d)
-			local len = table.getn(this[ind])
+			local len = #this[ind]
 			for j = 1, len do
 				o[i][j] = convert_o2n(this[ind][len - j + 1], d)
 			end
@@ -393,11 +393,11 @@ Omatrix_mt.__index = {
 		end
 
 		for i = 1, this.n do
-			if (table.getn(this[i]) ~= this:get_line_len(i, rotation)) then
+			if (#this[i] ~= this:get_line_len(i, rotation)) then
 				return false
 			end
 			
-			for j = 1, table.getn(this[i]) do
+			for j = 1, #this[i] do
 				if this[i][j] ~= this:get_val(rotation, i, j) then 
 					return false
 				end
@@ -420,11 +420,11 @@ Omatrix_mt.__index = {
 		o = this:get_reflected()
 		local function cmp_rotation(rotation)
 			for i = 1, o.n do
-				if (table.getn(o[i]) ~= this:get_line_len(i, rotation)) then
+				if (#o[i] ~= this:get_line_len(i, rotation)) then
 					return false
 				end
 				
-				for j = 1, table.getn(o[i]) do
+				for j = 1, #o[i] do
 					if o[i][j] ~= this:get_val(rotation, i, j) then 
 						return false
 					end
@@ -464,9 +464,9 @@ Omatrix_mt.__index = {
 	end,
 	
 	print = function(this)
-		for i = 1, table.getn(this) do
-			io.write(string.format("%2d ||%2d)\t", i, this.parallels[i] or 0))
-			for k = 1, table.getn(this[i]) do
+		for i = 1, #this do
+			--io.write(string.format("%2d ||%2d)\t", i, this.parallels[i] or 0))
+			for k = 1, #this[i] do
 				io.write(string.format("%d\t", this[i][k]))
 			end
 			io.write("\n")
@@ -523,7 +523,7 @@ Omatrix_mt.__index = {
 		this[n] = nil
 		n = n-1
 		for i = 1, n do
-			local llen = table.getn(this[i])
+			local llen = #this[i]
 			for j = 1, llen do
 				if this[i][j] == l then
 					for k = j, llen-1 do
@@ -536,7 +536,7 @@ Omatrix_mt.__index = {
 		end
 		
 		for i = 1, n do
-			for j = 1, table.getn(this[i]) do
+			for j = 1, #this[i] do
 				if this[i][j] > l then
 					this[i][j] = this[i][j] - 1
 				end
@@ -586,7 +586,7 @@ configuration_mt = {
 				matrix[i] = {}
 				lines[i] = i
 			end
-			for i = 1, table.getn(this) do
+			for i = 1, #this do
 				local gen = this[i]
 				local first = lines[gen]
 				local second = lines[gen+1]
@@ -614,7 +614,7 @@ configuration_mt = {
 				positions[i] = 0
 				matrix.parallels[i] = i
 			end
-			for i = 1, table.getn(this) do
+			for i = 1, #this do
 				local gen = this[i]
 				local first = lines[gen]
 				local second = lines[gen+1]
@@ -675,7 +675,7 @@ configuration_mt = {
 				is_int[i] = false
 			end
 			
-			for i = 1, table.getn(this) do
+			for i = 1, #this do
 				local gen = this[i]
 				n[gen-1] = n[gen-1] + 1
 				n[gen+1] = n[gen+1] + 1
@@ -719,7 +719,7 @@ configuration_mt = {
 				is_int[i] = false
 			end
 			
-			for i = 1, table.getn(this) do 
+			for i = 1, #this do 
 				local gen = this[i]
 				
 				p[gen].e = i
@@ -785,7 +785,7 @@ end
 -- out:		configuration
 function read_conf_from_table(gens_table)
 	local conf = {}
-	for i = 1, table.getn(gens_table) do
+	for i = 1, #gens_table do
 		conf[i] = gens_table[i]
 	end
 	
@@ -795,7 +795,7 @@ function read_conf_from_table(gens_table)
 		if max_gen < w then max_gen = w end
 	end
 	local N = max_gen + 1
-	local k = N*(N-1)/2 - table.getn(conf)
+	local k = N*(N-1)/2 - #conf
 	configurations[conf].N = N
 	configurations[conf].k = k
 	
@@ -820,7 +820,7 @@ function read_conf(gens)
 	local _, j = string.find(line, ")")
 	if j then line = string.sub(line, j) end
 	
-	for w in string.gfind(line, "(%d+)%s*") do
+	for w in string.gmatch(line, "(%d+)%s*") do
 		table.insert(conf, tonumber(w)+1)
 	end
 	return read_conf_from_table(conf)
@@ -851,7 +851,7 @@ function distance(bgr, i1, i2)
 	table.insert(input, i1)
 	local l
 	l = 0
-	while table.getn(input) > 0 do
+	while #input > 0 do
 		l = l + 1
 		for i, k in pairs(input) do
 			for i1, k1 in pairs(bgr[k]) do
@@ -956,12 +956,12 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 		local polygon = {}
 		if (conf[k.b] % 2) == color then
 			
-			for i = 1, table.getn(k.l) do
+			for i = 1, #k.l do
 				table.insert(polygon, x[k.l[i]])
 				table.insert(polygon, y[k.l[i]])
 			end
 			
-			for i = table.getn(k.r), 1, -1 do
+			for i = #k.r, 1, -1 do
 				table.insert(polygon, x[k.r[i]])
 				table.insert(polygon, y[k.r[i]])
 			end
@@ -974,7 +974,7 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 		
 	function get_tangent(l, d)
 		local g1 = Omat[l][1]
-		local g2 = Omat[l][table.getn(Omat[l])]
+		local g2 = Omat[l][#Omat[l]]
 		return {x = (x[g2] - x[g1]) * d, y = (y[g2] - y[g1]) * d}
 	end
 	
@@ -1031,22 +1031,22 @@ function convert_arn_to_svg(filename, svg_filename, border_size, color)
 			table.insert(polygon, t.y)
 			
 			if not k.b then
-				for i = 1, table.getn(k.l) do
+				for i = 1, #k.l do
 					table.insert(polygon, x[k.l[i] ])
 					table.insert(polygon, y[k.l[i] ])
 				end
 
-				for i = table.getn(k.r), 1, -1 do
+				for i = #k.r, 1, -1 do
 					table.insert(polygon, x[k.r[i] ])
 					table.insert(polygon, y[k.r[i] ])
 				end
 			else
-				for i = table.getn(k.r), 1, -1 do
+				for i = #k.r, 1, -1 do
 					table.insert(polygon, x[k.r[i] ])
 					table.insert(polygon, y[k.r[i] ])
 				end
 				
-				for i = 1, table.getn(k.l) do
+				for i = 1, #k.l do
 					table.insert(polygon, x[k.l[i] ])
 					table.insert(polygon, y[k.l[i] ])
 				end
