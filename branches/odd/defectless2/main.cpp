@@ -1,424 +1,432 @@
 #include <iostream>
-#include <optional>
-#include <bit>
 #include <array>
 #include <vector>
-#include <sstream>
+#include <optional>
+#include <assert.h>
 
-u_int64_t next_set_of_n_elements(u_int64_t x)
-{
-    u_int64_t smallest, ripple, new_smallest, ones;
+const unsigned N = 21;
 
-    if (x == 0)
-        return 0;
-    smallest     = (x & -x);
-    ripple       = x + smallest;
-    new_smallest = (ripple & -ripple);
-    ones         = ((new_smallest/smallest) >> 1) - 1;
-    return ripple | ones;
-}
+const int MAX_GENS = N * (N - 1) / 2;
+const int MAX_EVEN_GENS = (MAX_GENS - (N - 1) / 2 + 1) / 3;
 
-// Возвращает числа в порядке возрастания числа единичных бит
-struct BitSetGenerator
-{
-    unsigned max_bits;
-    unsigned max_val;
-    unsigned current_bits = 0;
-    u_int64_t num = 0;
+const u_int8_t NONE_GEN = 250;
 
-    explicit BitSetGenerator(unsigned int maxBits) : max_bits(maxBits) {
-        max_val = (1ul << maxBits) - 1;
-    }
-
-    bool next() {
-        if (current_bits > max_bits)
-            return false;
-
-        if (current_bits == 0 || (num = next_set_of_n_elements(num)) > max_val) {
-            ++current_bits;
-            num = (1ul << current_bits) - 1;
-        }
-
-        return current_bits <= max_bits;
-    }
-
-    u_int64_t current() {
-        return num;
-    }
+struct Prev {
+    std::array<u_int8_t, 3> d;
+    u_int8_t gen;
 };
 
-const unsigned N = 23;
-
 struct State {
-    std::array<int, N> lines;
-    std::array<int, N> lines_l; // для каждой линии количество линий слева от нее с порядковым номером меньше текущей
-    std::array<int, N> lines_r; // для каждой линии количество линий справа от нее с порядковым номером больше текущей
-    std::array<int, N + 1> d;
-    std::vector<int> applied_gens;
-    std::vector<int> old_d;
-    std::vector<std::array<int, 4>> old_lines_l_r;
+    std::array<u_int8_t, N> lines;
+    // Два байта для каждой линии, в первом - число линий меньше текущей слева от текущей, второй число линий больше текущей справа от текущей
+    std::array<u_int16_t, N> lines_lr;
+    std::array<u_int8_t, N + 1> d;
+    std::array<Prev, MAX_EVEN_GENS> prev;
+    std::array<u_int8_t, MAX_EVEN_GENS * (N / 2)> available_gens;
+    int prev_size;
+    int available_gens_size;
 
-    void apply_gen(int i) {
-        applied_gens.push_back(i);
-        old_d.push_back(d[i+1]);
-        std::swap(lines[i], lines[i + 1]);
+    State() {
+        prev_size = 0;
+        available_gens_size = 0;
+        for (u_int8_t i = 0; i < N; ++i) {
+            lines[i] = i;
+            lines_lr[i] = i * 256 + i;
+        }
+
+        validate_lr();
+
+        for (int i = 0; i < N + 1; ++i) {
+            d[i] = 2;
+        }
+
+        for (int i = 1; i < N - 1; i += 2) {
+            modify_lr_single_gen(i);
+        }
+
+        for (int i = 2; i <= N - 3; i += 2) {
+            available_gens[available_gens_size++] = i;
+        }
+
+        validate_lr();
+    }
+
+    void apply_gen(u_int8_t i) {
+        if (i > 0) {
+            assert(lines[i] < lines[i + 1]);
+            assert(lines[i] < lines[i + 2]);
+            assert(lines[i - 1] < lines[i + 1]);
+        }
+        else
+        {
+            assert(lines[i] < lines[i + 1]);
+            assert(lines[i] < lines[i + 2]);
+        }
+
+        prev[prev_size++] = {{d[i], d[i + 1], d[i + 2]}, i};
+        modify_lr(i);
+    }
+
+    void revert_last_gen() {
+        Prev p = prev[prev_size - 1];
+        --prev_size;
+
+        u_int8_t i = p.gen;
+        if (i > 0) {
+            std::tie(lines_lr[i - 1], lines_lr[i], lines_lr[i + 1], lines_lr[i + 2]) =
+                    std::tuple(lines_lr[i] - 1, lines_lr[i + 2] - 2, lines_lr[i - 1] + 2*256, lines_lr[i + 1] + 1*256);
+            d[i - 1]--;
+
+            std::tie(lines[i - 1], lines[i], lines[i + 1], lines[i + 2]) =
+                    std::tuple(lines[i], lines[i + 2], lines[i - 1], lines[i + 1]);
+        }
+        else {
+            std::tie(lines_lr[i], lines_lr[i + 1], lines_lr[i + 2]) =
+                    std::tuple(lines_lr[i + 2] - 2, lines_lr[i] + 1*256, lines_lr[i + 1] + 1*256);
+
+            std::tie(lines[i], lines[i + 1], lines[i + 2]) =
+                    std::tuple(lines[i + 2], lines[i], lines[i + 1]);
+        }
+
+        std::tie(d[i], d[i + 1], d[i + 2])
+                = std::tuple(p.d[0], p.d[1], p.d[2]);
+        d[i + 3]--;
+
+//        validate_lr();
+    }
+
+    void validate_lr() {
+        for (int l = 0; l < N; ++l) {
+            int c1 = 0;
+            int c2 = 0;
+
+            for (int i = 0; i < l; ++ i) {
+                if (lines[i] < lines[l])
+                    ++c1;
+            }
+
+            for (int i = l + 1; i < N; ++ i) {
+                if (lines[l] < lines[i])
+                    ++c2;
+            }
+
+            if (lines_lr[l] >> 8 != c1) {
+                std::cout << "ERR" << std::endl;
+            }
+
+            int r = lines_lr[l] & 255;
+            if ((r) != (N - 1 - c2)) {
+                std::cout << "ERR" << std::endl;
+            }
+        }
+    }
+
+    void revert_applied_to(size_t count) {
+        assert(prev_size >= count);
+        while (prev_size > count) {
+            revert_last_gen();
+        }
+    }
+
+    void revert_available_to(size_t count) {
+        assert(available_gens_size >= count);
+        available_gens_size = count;
+    }
+
+    void modify_lr_single_gen(u_int8_t i) {
+        std::tie(lines_lr[i], lines_lr[i + 1]) =
+                std::tuple(lines_lr[i + 1] - 256, lines_lr[i] + 1);
+
         d[i]++;
         d[i+1] = 0;
         d[i+2]++;
 
-        int li = lines_l[i];
-        int li1 = lines_l[i + 1];
-        lines_l[i] = li1 - 1;
-        lines_l[i + 1] = li;
-
-        int ri = lines_r[i];
-        int ri1 = lines_r[i + 1];
-        lines_r[i] = ri1;
-        lines_r[i + 1] = ri - 1;
-
-        old_lines_l_r.push_back({li, li1, ri, ri1});
+        std::tie(lines[i], lines[i + 1]) =
+                std::tuple(lines[i + 1], lines[i]);
     }
 
-    void revert_last_gen() {
-        size_t ind = applied_gens.size() - 1;
-        int i = applied_gens[ind];
-        std::swap(lines[i], lines[i + 1]);
-        d[i]--;
-        d[i+1] = old_d[ind];
-        d[i+2]--;
+    void modify_lr(u_int8_t i) {
+        assert(i % 2 == 0);
+        assert(i >= 0);
+        assert(i <= N - 3);
+        if (i > 0) {
+            std::tie(lines_lr[i - 1], lines_lr[i], lines_lr[i + 1], lines_lr[i + 2]) =
+                    std::tuple(lines_lr[i + 1] - 2*256, lines_lr[i - 1] + 1, lines_lr[i + 2] - 1*256, lines_lr[i] + 2);
 
-        std::array<int, 4> &rl = old_lines_l_r[ind];
-        lines_l[i] = rl[0];
-        lines_l[i + 1] = rl[1];
-        lines_r[i] = rl[2];
-        lines_r[i + 1] = rl[3];
+            d[i-1]++;
+            d[i] = 0;
+            d[i+1] = 2;
+            d[i+2] = 0;
+            d[i+3]++;
 
-        applied_gens.pop_back();
-        old_d.pop_back();
-        old_lines_l_r.pop_back();
+            std::tie(lines[i - 1], lines[i], lines[i + 1], lines[i + 2]) =
+                    std::tuple(lines[i + 1], lines[i - 1], lines[i + 2], lines[i]);
+        }
+        else {
+            std::tie(lines_lr[i], lines_lr[i + 1], lines_lr[i + 2]) =
+                    std::tuple(lines_lr[i + 1] - 1*256, lines_lr[i + 2] - 1*256, lines_lr[i] + 2);
+
+            d[i]++;
+            d[i+1] = 1;
+            d[i+2] = 0;
+            d[i+3]++;
+
+            std::tie(lines[i], lines[i + 1], lines[i + 2]) =
+                    std::tuple(lines[i + 1], lines[i + 2], lines[i]);
+        }
+
+//        validate_lr();
+    }
+};
+
+struct Level {
+    u_int64_t gens_mask; // единичные биты задают номера примененных available gens
+    u_int64_t max_gens_mask;
+    size_t available_gens_start_ind;
+    size_t available_gens_end_ind;
+    size_t applied_gens_start_ind;
+    size_t applied_gens_end_ind;
+    u_int8_t parent_min_changed_line;
+    u_int8_t parent_max_changed_line;
+
+    static Level first_level(State &s) {
+        Level res;
+        res.gens_mask = 0;
+        res.max_gens_mask = 1ul << s.available_gens_size;
+        res.available_gens_start_ind = 0;
+        res.available_gens_end_ind = s.available_gens_size;
+        res.applied_gens_start_ind = 0;
+        res.parent_min_changed_line = 0;
+        res.parent_max_changed_line = N - 1;
+        res.next_gens(s);
+        res.applied_gens_end_ind = s.prev_size;
+        return res;
     }
 
-    bool compute_is_final() {
-        for (int i = 0; i < N - 1; ++i) {
-            if (lines[i] < lines[i + 1]) {
+    std::optional<Level> next_level(State &s) {
+        s.revert_applied_to(applied_gens_end_ind);
+        s.revert_available_to(available_gens_end_ind);
+
+        u_int8_t last_ind = NONE_GEN;
+        for (size_t i = applied_gens_start_ind; i < applied_gens_end_ind; ++i) {
+            u_int8_t g = s.prev[i].gen;
+
+            // Генераторы след уровня могут только на -2/+2 отличаться от генераторов пред уровня
+            if (g > 1 && last_ind != g - 2 && is_valid_gen(s, g - 2)) {
+                s.available_gens[s.available_gens_size++] = (g - 2);
+            }
+
+            if (g < N - 4 && is_valid_gen(s, g + 2)) {
+                s.available_gens[s.available_gens_size++] = (g + 2);
+                last_ind = g + 2;
+            }
+        }
+
+        size_t count = s.available_gens_size - available_gens_end_ind;
+        if (!count)
+            return std::nullopt;
+
+        Level res;
+        res.gens_mask = 0;
+        res.max_gens_mask = (1ul << count);
+        res.available_gens_start_ind = available_gens_end_ind;
+        res.available_gens_end_ind = s.available_gens_size;
+        res.applied_gens_start_ind = applied_gens_end_ind;
+        res.parent_min_changed_line = std::max(0, s.prev[applied_gens_start_ind].gen - 1);
+        res.parent_max_changed_line = std::min((u_int8_t) (N - 1), (u_int8_t) (s.prev[applied_gens_end_ind - 1].gen + 2));
+        if (res.next_gens(s)) {
+            return res;
+        }
+        return std::nullopt;
+    }
+
+    bool is_valid_gen(State &s, u_int8_t g) {
+        if (s.d[g + 1] < 3) // without defects, disallow white triangles and squares
+            return false;
+
+        if (g == 0) {
+            bool res = (s.lines_lr[1]) == 256 + N - 1; // генератор 0 может пересечь только прямые 0 и N-1
+
+//            bool res2 = s.lines[g] < s.lines[g + 1] &&
+//                        s.lines[g] < s.lines[g + 2];
+//
+//            if (res != res2) {
+//                std::cout << "ERR " << std::endl;
+//            }
+
+            return res;
+        }
+
+        bool res = s.lines_lr[g] < s.lines_lr[g + 1] &&
+                   s.lines_lr[g] + 257 < s.lines_lr[g + 2] &&
+                   s.lines_lr[g - 1] + 257 < s.lines_lr[g + 1];
+
+//        bool res2 = s.lines[g] < s.lines[g + 1] &&
+//                    s.lines[g] < s.lines[g + 2] &&
+//                    s.lines[g - 1] < s.lines[g + 1];
+//
+//        if (res != res2) {
+//            std::cout << "ERR " << std::endl;
+//        }
+
+        if (res) {
+            // Прямые i и i+1 могут пересечься только в самом конце, в генераторе под номером i.
+            if (s.lines[g] + 1 == s.lines[g + 2] && (g + s.lines[g] != (N - 3)))
                 return false;
+
+            if (s.lines[g - 1] + 1 == s.lines[g + 1] && (g + s.lines[g - 1] != (N - 1)))
+                return false;
+        }
+        return res;
+    }
+
+    bool next_gens(State &s) {
+        s.revert_available_to(available_gens_end_ind);
+        s.revert_applied_to(applied_gens_start_ind);
+        while (++gens_mask < max_gens_mask) {
+            if (apply_gens(s, gens_mask)) {
+                applied_gens_end_ind = s.prev_size;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool apply_gens(State &s, u_int64_t gens_mask) {
+        if (available_gens_start_ind == 0)
+        {
+            if (!(gens_mask & (1ul << (N - 5)/2)))
+                return false;
+        }
+        u_int8_t last_gen = NONE_GEN;
+        u_int8_t min_gen;
+        int j = -1;
+        for (size_t i = available_gens_start_ind; i < available_gens_end_ind; ++i) {
+            ++j;
+
+            if ((gens_mask & (1ul << j)) == 0)
+                continue;
+
+            u_int8_t g = s.available_gens[i];
+            if (g == last_gen + 2) {
+                return false;
+            }
+
+            if (last_gen == NONE_GEN)
+                min_gen = g;
+            last_gen = g;
+        }
+
+        // Если слева от минимального генератора есть линии, которые не можем пересечь с правой стороны, отбрасываем
+        for (int i = parent_min_changed_line; i < min_gen - 1; ++i) {
+            if (s.lines_lr[i] > 256 && (s.lines_lr[i] & 255) == (N - 1))
+                return false;
+        }
+
+        // Если справа от максимального генератора есть линии, которые не можем пересечь с левой стороны, отбрасываем
+        for (int i = last_gen + 3; i <= parent_max_changed_line; ++i) {
+            if (s.lines_lr[i] > 0 && s.lines_lr[i] < N - 1)
+                return false;
+        }
+
+        j = -1;
+        for (size_t i = available_gens_start_ind; i < available_gens_end_ind; ++i) {
+            ++j;
+            if (gens_mask & (1ul << j)) {
+                u_int8_t g = s.available_gens[i];
+                s.apply_gen(g);
             }
         }
 
         return true;
     }
-
-    int gens_count() {
-        return applied_gens.size();
-    }
-
-    void revert_to(int count) {
-        int num_to_revert = gens_count() - count;
-        for (int i = 0; i < num_to_revert; ++i)
-            revert_last_gen();
-    }
 };
 
-// Генераторы сгруппированы по уровням, уровень содержит либо только четные, либо только нечетные генераторы.
-// Четность зависит от порядкового номера уровня.
-// Каждый следующий уровень может содержать только те генераторы, которые +1/-1 генераторов текущего уровня.
-// Для нечетных генераторов перебора нет, они применяются все всегда, т.е. каждому четному генератору предыдущего уровня
-//  соответствует два нечетных -1/+1 генератора, кроме случая, когда четный генератор был нулевой.
-struct Level {
-    u_int64_t available_gens;
-    u_int64_t euristic; // Не особо полезно, помогает, но совсем мизер
-    u_int64_t mandatory_gens;
-    int applied_gens_count;
-    BitSetGenerator bits = BitSetGenerator(0);
-    int level;
-
-    static Level level1(State &s) {
-        Level res;
-        res.level = 1;
-        for (int i = 0; i < N; ++i) {
-            s.lines[i] = i;
-            s.lines_l[i] = i;
-            s.lines_r[i] = (int) N - 1 - i;
-        }
-        for (int i = 0; i < N + 1; ++i) {
-            s.d[i] = 2;
-        }
-
-        res.update_available_gens(s);
-        res.bits = BitSetGenerator {(unsigned ) std::popcount(res.available_gens)};
-        res.applied_gens_count = 0;
-        res.mandatory_gens = 0ul;
-        res.euristic = 0ul;
-        return res;
-    }
-
-    std::optional<Level> next_level(bool &is_final, State &s) {
-        s.revert_to(applied_gens_count);
-
-        Level res;
-        res.level = level + 1;
-        u_int64_t gens = actual_gens();
-        for (int i = 0; i < N - 1; ++i) {
-            if (gens & (1ul << i)) {
-                s.apply_gen(i);
-            }
-        }
-
-        is_final = s.compute_is_final();
-
-        res.update_available_gens(s);
-        u_int64_t m = (gens << 1 | gens >> 1);
-
-        int ods = res.level % 2;
-        if (ods && res.available_gens != m)
-            return std::nullopt;
-        res.available_gens &= m;
-        res.euristic &= m;
-        res.update_mandatory_gens(s);
-        unsigned available_gens_count = (unsigned ) std::popcount(res.available_gens);
-        if (available_gens_count == 0)
-            return std::nullopt;
-        res.bits = BitSetGenerator {available_gens_count};
-        while (!res.is_valid_gens(res.actual_gens(), s)) {
-            if (!res.bits.next())
-                return std::nullopt;
-        }
-        res.applied_gens_count = s.gens_count();
-        return res;
-    }
-
-    bool next(State &s) {
-        s.revert_to(applied_gens_count);
-
-        int ods = level % 2;
-        if (ods)
-            return false;
-
-        while (bits.next()) {
-            if (!is_valid_gens(actual_gens(), s))
-                continue;
-            return true;
-        }
-
-        return false;
-    }
-
-    bool is_valid_gens(u_int64_t gens, State &s) {
-        if (gens == 0)
-            return false;
-
-        int ods = level % 2;
-        if (ods)
-            return true;
-
-        if ((gens & mandatory_gens) != mandatory_gens)
-            return false;
-
-        // Первая линия может пересекать только последнюю
-        if ((gens & 1) && s.lines[1] != (N - 1))
-            return false;
-
-        // Если справа от максимального генератора есть линия с номером меньше, чем у любой другой линии левее нее, и
-        // справа от этой линии есть линия с номером больше чем у нее, то конф не валидна.
-        // Т.е. отбрасываем комбинации в который есть линия, которую мы не можем пересечь слева, а перебор делается слева,
-        // и справа от нее линии еще не упорядочены.
-        for (int i = N - 1; i --> 0;) {
-            if (gens & (1ul << i)) {
-                break;
-            }
-
-            if (s.lines_l[i + 1] == 0 && s.lines_r[i + 1] > 0)
-                return false;
-        }
-
-        // Аналогично для минимального генератора
-        for (int i = 0; i < N - 2; ++i) {
-            if (gens & (1ul << i)) {
-                break;
-            }
-
-            if (s.lines_l[i] > 0 && s.lines_r[i] == 0)
-                return false;
-        }
-
-        return ((gens << 2) & gens) == 0 && ((gens >> 2) & gens) == 0; // defectless
-    }
-
-    void update_available_gens(State &s) {
-        available_gens = 0;
-        euristic = 0;
-        int ods = level % 2;
-        for (int i = 0; i < N - 1; ++i) {
-            if (i % 2 == ods) {
-                if (s.lines[i] < s.lines[i + 1]) {
-                    if (!ods) {
-                        if (s.d[i] == 1 || s.d[i + 1] == 1) // disallow black squares
-                            continue;
-
-                        if (s.d[i + 1] < 3) // without defects, disallow white triangles and squares
-                            continue;
-
-                        if (s.d[i + 1] > 4)
-                            euristic |= (1ul << i);
-                    }
-
-                    available_gens |= (1ul << i);
-                }
-            }
-        }
-
-        // Для нулевого генератора первая линия может пересекать только последнюю
-        if (available_gens & 1 && (s.lines[0] != 0 || s.lines[1] != (N - 1)))
-            available_gens--;
-    }
-
-    void update_mandatory_gens(State &s)
-    {
-        mandatory_gens = 0ul;
-
-        // Фиксируем предпоследний генератор на втором уровне, чтобы зафиксировать начальное вращение
-        if (level == 2)
-            mandatory_gens = (1ul << (N - 3));
-    }
-
-    u_int64_t actual_gens() {
-        int ods = level % 2;
-        if (ods)
-            return available_gens;
-
-        u_int64_t res = 0;
-        int mi = 0;
-        for (int i = 0; i < N; ++i) {
-            if (available_gens & (1ul << i)) {
-                if (bits.num & (1ul << mi)) {
-                    res |= (1ul << i);
-                }
-                ++mi;
-            }
-        }
-
-        res = res ^ euristic;
-        return res;
-    }
-
-    Level next_level_with_gens(State &s, u_int64_t gens) {
-        bool is_final;
-        std::optional<Level> res = next_level(is_final, s);
-        if (!res.has_value())
-            throw std::runtime_error("E1 No specified combination");
-
-        while(true) {
-            if (res.value().actual_gens() == gens)
-                return res.value();
-
-            if (!res.value().next(s))
-            {
-                throw std::runtime_error("E2 No specified combination");
-            }
-        }
-    }
-};
-
-u_int64_t gen(const std::vector<int> &l) {
-    u_int64_t res = 0;
-
-    for (auto v : l)
-        res |= (1ul << v);
-
-    return res;
-}
-
-int main()
-{
+int main() {
     State state;
     Level levels[N * (N + 1) / 2];
-    levels[0] = Level::level1(state);
+    levels[0] = Level::first_level(state);
 
     long count = 0;
-//    int max_res = -1;
-    int max_res = 39;
 
     int cur_level = 0;
     int min_level = 0;
     long iters = 0;
 
-    {
-        // Продолжение обсчета начиная с указанных генераторов
-//        std::istringstream iss("1 3 5 7 9 11 13 15 17 19 21 8 12 20");
-//
-//        int g;
-//        bool is_odd = true;
-//        std::vector<int> level_gens;
-//        int level = 1;
-//        while (iss >> g) {
-//            bool current_is_odd = g % 2 == 1;
-//
-//            if (current_is_odd != is_odd) {
-//                if (level > 1 && !level_gens.empty()) {
-//                    levels[cur_level + 1] = levels[cur_level].next_level_with_gens(state, gen(level_gens));
-//                    ++cur_level;
-//                }
-//                is_odd = current_is_odd;
-//                ++level;
-//                level_gens.clear();
-//            }
-//
-//            level_gens.push_back(g);
-//        }
-//
-//        levels[cur_level + 1] = levels[cur_level].next_level_with_gens(state, gen(level_gens));
-//        ++cur_level;
-
-        // останавливать обсчет, если начальные генераторы больше не соответствуют переданным
-//        min_level = level;
-    }
-
     while (true) {
-        if (iters % 10000000 == 0)
+        if (iters % 100000000 == 0)
         {
-            if (iters % 100000000 == 0)
+            std::cout << iters << " | PROGRESS | ";
+            for (int i = 1; i < N - 1; i += 2) {
+                std::cout << i << " ";
+            }
+
+            for (int i = 0; i < state.prev_size; ++i) {
+                u_int8_t g = state.prev[i].gen;
+                std::cout << (int) g << " ";
+                if (g > 0)
+                    std::cout << (int) (g - 1) << " ";
+                std::cout << (int) (g + 1) << " ";
+            }
+
+            std::cout << " | L " << cur_level << " | ";
+
+            double progress = 0.0;
+            double part = 1.0;
+            for (int i = 0; i <= cur_level; ++i)
             {
-                std::cout << iters << " | PROGRESS | ";
-                for (auto v : state.applied_gens) {
-                    std::cout << v << " ";
-                }
-                std::cout << std::endl;
+                std::cout << levels[i].gens_mask << "/" << levels[i].max_gens_mask << " ";
+                part /= (double) (levels[i].max_gens_mask - 1);
+                progress += levels[i].gens_mask * part;
             }
-            else {
-                std::cout << iters << std::endl;
-            }
+
+            std::cout << " | PRC " << (progress * 100.0);
+
+            std::cout << std::endl;
         }
         ++iters;
-        bool is_final;
-        auto next = levels[cur_level].next_level(is_final, state);
+        auto next = levels[cur_level].next_level(state);
         if (next.has_value()) {
             levels[++cur_level] = next.value();
             continue;
         }
 
-        if (is_final) {
+        if (state.prev_size == MAX_EVEN_GENS)
+        {
             ++count;
 
-            int res = 0;
-            for (auto g : state.applied_gens) {
-                if (g % 2)
-                    ++res;
-                else
-                    --res;
+//            for (int i = 0; i <= cur_level; ++i)
+//            {
+//                std::cout << levels[i].gens_mask << " ";
+//            }
+//            std::cout << std::endl;
+
+            int res = (N - 1) / 2;
+            for (int i = 0; i < state.prev_size; ++i) {
+                u_int8_t g = state.prev[i].gen;
+                if (g > 0)
+                    res++;
             }
 
-            if (res >= max_res)
+//            if (res >= max_res)
             {
-                max_res = res;
-                for (auto v : state.applied_gens) {
-                    std::cout << v << " ";
+                for (int i = 1; i < N - 1; i += 2) {
+                    std::cout << i << " ";
                 }
-                std::cout << " | " << res << " | processed = " << count << " | iter = " << iters << std::endl;
+
+                for (int i = 0; i < state.prev_size; ++i) {
+                    u_int8_t g = state.prev[i].gen;
+                    std::cout << (int) g << " ";
+                    if (g > 0)
+                        std::cout << (int) (g - 1) << " ";
+                    std::cout << (int) (g + 1) << " ";
+                }
+                std::cout << " | " << (int) res << " | processed = " << count << " | iter = " << iters << std::endl;
             }
         }
 
         while (true) {
-            if (levels[cur_level].next(state))
+            if (levels[cur_level].next_gens(state))
                 break;
 
             cur_level--;
@@ -429,51 +437,6 @@ int main()
             }
         }
     }
-}
 
-// Позволяет вывести список из нескольких начальных генераторов, чтобы можно было ориентироваться и оценить прогресс
-int main2()
-{
-    State state;
-    Level levels[N * (N + 1) / 2];
-    levels[0] = Level::level1(state);
-
-    int cur_level = 0;
-    long iters = 0;
-
-    std::vector<std::vector<int>> lines;
-    long count = 0;
-    while (true) {
-        bool is_final;
-        if (cur_level < 8) {
-            auto next = levels[cur_level].next_level(is_final, state);
-            if (next.has_value()) {
-                levels[++cur_level] = next.value();
-                continue;
-            }
-        }
-
-        lines.push_back(state.applied_gens);
-        ++count;
-        while (true) {
-            if (levels[cur_level].next(state))
-                break;
-
-            cur_level--;
-            if (cur_level < 0) {
-                double i = 0;
-                for (auto &l : lines)
-                {
-                    ++i;
-                    for (auto v : l) {
-                        std::cout << v << " ";
-                    }
-                    std::cout << " | " << (i * 100.0 / lines.size()) << "%" << std::endl;
-                }
-
-                std::cout << count << std::endl;
-                return 0;
-            }
-        }
-    }
+    return 0;
 }
