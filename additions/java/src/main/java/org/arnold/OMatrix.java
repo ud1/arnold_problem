@@ -1,11 +1,13 @@
 package org.arnold;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 
 public class OMatrix
@@ -14,12 +16,28 @@ public class OMatrix
     private final int numLines;
     private final int numVertices;
     private final Map<Integer, Integer> parallels = new TreeMap<>();
+    private final int hash;
 
     private OMatrix(ArrayList<ArrayList<Integer>> lineIntersections, int numLines, int numVertices)
     {
         this.lineIntersections = lineIntersections;
         this.numLines = numLines;
         this.numVertices = numVertices;
+        this.hash = computeHash();
+    }
+
+    private int computeHash()
+    {
+        int hash = 1;
+        for (ArrayList<Integer> r : lineIntersections)
+        {
+            for (Integer v : r)
+            {
+                hash = hash * 106039 + v;
+            }
+        }
+
+        return hash;
     }
 
     public OMatrix(Generators generators)
@@ -57,6 +75,54 @@ public class OMatrix
                 parallels.put(lines[i + 1], lines[i]);
             }
         }
+
+        this.hash = computeHash();
+    }
+
+    public OMatrix extractSubmatrix(int[] lines)
+    {
+        Arrays.sort(lines);
+        int[] lineInds = new int[numLines];
+
+        {
+            int j = 0;
+            for (int i = 0; i < numLines; ++i)
+            {
+                if (j < lines.length && lines[j] == i)
+                {
+                    lineInds[i] = j;
+                    ++j;
+                }
+                else
+                {
+                    lineInds[i] = -1;
+                }
+            }
+        }
+
+        int newNumVertices = 0;
+        ArrayList<ArrayList<Integer>> newLineIntersections = new ArrayList<>(lines.length);
+        for (int i = 0; i < numLines; ++i)
+        {
+            if (lineInds[i] >= 0)
+            {
+                ArrayList<Integer> oldRow = lineIntersections.get(i);
+                ArrayList<Integer> row = new ArrayList<>(lines.length - 1);
+                newLineIntersections.add(row);
+
+                for (int j = 0; j < oldRow.size(); ++j)
+                {
+                    int newInd = lineInds[oldRow.get(j)];
+                    if (newInd >= 0)
+                    {
+                        row.add(newInd);
+                        newNumVertices++;
+                    }
+                }
+            }
+        }
+
+        return new OMatrix(newLineIntersections, lines.length, newNumVertices/2);
     }
 
     public OMatrix sphereRotation(int val)
@@ -328,7 +394,7 @@ public class OMatrix
                 int left = lines[gen];
                 int right = lines[gen + 1];
                 if (pos[left] < lineIntersections.get(left).size() && pos[right] < lineIntersections.get(right).size()
-                    && lineIntersections.get(left).get(pos[left]).equals(right) && lineIntersections.get(right).get(pos[right]).equals(left))
+                        && lineIntersections.get(left).get(pos[left]).equals(right) && lineIntersections.get(right).get(pos[right]).equals(left))
                 {
                     pos[left]++;
                     pos[right]++;
@@ -449,5 +515,11 @@ public class OMatrix
     public List<Integer> getLine(int l)
     {
         return Collections.unmodifiableList(lineIntersections.get(l));
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return hash;
     }
 }
