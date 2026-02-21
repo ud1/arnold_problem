@@ -296,7 +296,7 @@ static double calc_evaluation_log_avg() {
 
     for (int i = n_step + 1; i--;) {
         if (stat[i].processed > 1) {
-            const double w = ((double) stat[i].processed);
+            const double w = log1p((double) stat[i].processed);
             sum += w * i;
             weight += w;
         }
@@ -311,6 +311,8 @@ static double calc_evaluation_log_avg() {
 
 static double calc_evaluation () {
 #if GENERATOR_SORTING == SORTING_ORDER
+    return 0.0;
+#elif GENERATOR_SORTING == SORTING_ITERATIONS
     return 0.0;
 #elif GENERATOR_SORTING == SORTING_EVALUATION_LOG_LINEAR
     return calc_evaluation_log_linear();
@@ -695,6 +697,10 @@ unsigned long int run(
                  * где мы его уже начали.
                  */
                 min_level = last_unprocessed_level;
+#elif FORK_JOB == FORK_NONE
+                message.target_level = min_level;
+                message.current_level = level;
+                message.remaining_level = level;
 #endif
 
                 message.evaluation = calc_evaluation();
@@ -705,6 +711,10 @@ unsigned long int run(
                 message.max_s = max_s;
 
                 send_message_to_dispatcher(&message);
+
+#if FORK_JOB == FORK_NONE
+                return iterations;
+#endif
 
                 for (i = 0; i <= n_step; ++i) {
                     stat[i].processed = 1;

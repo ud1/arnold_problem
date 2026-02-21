@@ -71,10 +71,7 @@ static struct {
 } dispatcher_timings;
 
 int compare_messages(Message *ma, Message *mb) {
-#if GENERATOR_SORTING != SORTING_ORDER
-    // Сортировка на основе оценки
-    return ma->evaluation - mb->evaluation;
-#else
+#if GENERATOR_SORTING == SORTING_ORDER
     int *p1 = ma->rearr_index;
     int *p2 = mb->rearr_index;
     // ReSharper disable once CppTooWideScopeInitStatement
@@ -83,8 +80,22 @@ int compare_messages(Message *ma, Message *mb) {
     for (; !(*p2 - *p1) && p1 <= end_pointer; ++p1, ++p2) {
         // noop;
     }
-
     return *p2 - *p1;
+#elif GENERATOR_SORTING == SORTING_ORDER_REVERSE
+    int *p1 = ma->rearr_index;
+    int *p2 = mb->rearr_index;
+    // ReSharper disable once CppTooWideScopeInitStatement
+    const int *end_pointer = p1 + min(ma->current_level, mb->current_level);
+
+    for (; !(*p2 - *p1) && p1 <= end_pointer; ++p1, ++p2) {
+        // noop;
+    }
+    return - *p2 + *p1;
+#elif GENERATOR_SORTING == SORTING_ITERATIONS
+    return - ma->iterations + mb->iterations;
+#else
+    // Сортировка на основе оценки
+    return ma->evaluation - mb->evaluation;
 #endif
 }
 
@@ -136,14 +147,16 @@ void enqueue_message(Message *message, const struct timeval start) {
         }
 
         printf(
-            "-------> util=%.1f speed=%f queue size %d push=%lu pop=%lu eval=%.2f...%.2f compared=%d\n",
+            "-------> util=%.1f speed=%f qsize %d push=%lu pop=%lu eval=%.2f...%.2f i=%.2e...%.2e cmp=%d\n",
             100.0 * (double) dispatcher_timings.run_time / (double) (
                 dispatcher_timings.run_time + dispatcher_timings.idle_time),
-            (double) total_iterations / time_diff_us(now, start),
+            (double) total_iterations / (double) time_diff_us(now, start),
             message_queue_size,
             dispatcher_timings.enqueue_count,
             dispatcher_timings.enqueue_count - message_queue_size,
-            message_queue[0]->evaluation, message_queue[message_queue_size - 1]->evaluation, compare_counter
+            message_queue[0]->evaluation, message_queue[message_queue_size - 1]->evaluation,
+            (double)message_queue[0]->iterations, (double)message_queue[message_queue_size - 1]->iterations,
+            compare_counter
         );
     }
 }
@@ -410,7 +423,7 @@ void do_dispatcher(
     message.max_s = max_s = 0;
 
     if (!dump_filename[0]) {
-#if INITIALIZATION == INITIALIZATION_ROOT
+#if INITIALIZATION == 0
         // Эталон
         msg = (Message *) malloc(sizeof(Message));
         msg->current_level = 0;
@@ -422,21 +435,65 @@ void do_dispatcher(
         msg->rearr_index[0] = -1;
         msg->max_s = 0;
         enqueue_message(msg, start);
-#elif  INITIALIZATION == INITIALIZATION_FIRST_LEVEL
-        for (int i = (n - 1) / 2; i--;) {
-            msg = (Message *) malloc(sizeof(Message));
-            msg->current_level = 1;
-            msg->target_level = 0;
-            msg->evaluation = n * n;
-            msg->status = BUSY;
-            msg->iterations = 0;
-            msg->rearrangement[0] = 0;
-            msg->rearr_index[0] = i;
-            msg->rearrangement[1] = 0;
-            msg->rearr_index[1] = -1;
-            msg->max_s = 0;
-            enqueue_message(msg, start);
+#else
+        const int max_index = (n - 1) / 2;  // Максимальное значение индекса на каждом уровне
+        int indices[INITIALIZATION];  // Массив для хранения текущих индексов
+        int level = 0;  // Текущий уровень (0..INITIALIZATION-1)
+
+        // Инициализация массива индексов
+        for (int i = 0; i < INITIALIZATION; i++) {
+            indices[i] = -1;  // Начинаем с -1, чтобы первый инкремент дал 0
         }
+
+        // Итеративный перебор всех комбинаций (аналог вложенных циклов)
+        while (level >= 0) {
+            // Увеличиваем индекс на текущем уровне
+            indices[level]++;
+
+            // Если индекс превысил максимум, откатываемся на уровень выше
+            if (indices[level] >= max_index) {
+                indices[level] = -1;
+                level--;
+                continue;
+            }
+
+            // Если дошли до последнего уровня — создаём сообщение
+            if (level == INITIALIZATION - 1) {
+                msg = (Message *)malloc(sizeof(Message));
+                msg->current_level = INITIALIZATION;
+                msg->target_level = INITIALIZATION - 1;
+                msg->evaluation = n * n;
+                msg->status = BUSY;
+                msg->iterations = 0;
+
+                // Заполняем rearrangement (всегда 0) и rearr_index
+                for (int j = 0; j <= INITIALIZATION; j++) {
+                    msg->rearrangement[j] = 0;
+                    msg->rearr_index[j] = (j < INITIALIZATION) ? indices[j] : -1;
+                }
+
+                msg->max_s = 0;
+                enqueue_message(msg, start);
+            }
+            // Иначе переходим на следующий уровень
+            else {
+                level++;
+            }
+        }
+        // for (int i = (n - 1) / 2; i--;) {
+        //     msg = (Message *) malloc(sizeof(Message));
+        //     msg->current_level = 1;
+        //     msg->target_level = 0;
+        //     msg->evaluation = n * n;
+        //     msg->status = BUSY;
+        //     msg->iterations = 0;
+        //     msg->rearrangement[0] = 0;
+        //     msg->rearr_index[0] = i;
+        //     msg->rearrangement[1] = 0;
+        //     msg->rearr_index[1] = -1;
+        //     msg->max_s = 0;
+        //     enqueue_message(msg, start);
+        // }
 #endif
     } else {
         load_queue(dump_filename, start);
@@ -504,6 +561,8 @@ void do_dispatcher(
 #elif FORK_JOB == FORK_CURRENT
                 // Отдаем диспетчеру текущую работу, а сами прыгамем к будущей
                 jobs[sender_id - 1].current_level = message.target_level;
+#elif FORK_JOB == FORK_NONE
+                // Ничего не делаем, потому что сразу же получим сообщение FINISHED
 #endif
                 worker_stat_array[sender_id - 1].sum_iterations += message.iterations - jobs[sender_id - 1].iterations;
                 jobs[sender_id - 1].iterations = message.iterations;
