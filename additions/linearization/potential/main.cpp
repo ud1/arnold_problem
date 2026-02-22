@@ -75,7 +75,7 @@ static bool read_file(const std::string& path, std::string& out) {
 // "Margin" used in hinge penalties max(raw + min_*, 0)^2.
 // Strict feasibility is always checked against raw < 0.
 static double g_min_edge = 1.0;
-static double g_min_angle = 0.001;
+static double g_min_angle = 0.01;
 
 struct EdgeTerm {
     size_t p1, p2, p3, p4, p5, p6, p7, p8;
@@ -173,9 +173,9 @@ struct Terms {
     std::vector<EdgeTerm> edgeTerms;
     std::vector<AngleTerm> angleTerms;
     std::vector<double> params;
-    std::vector<double> params1;
-    std::vector<double> params2;
+    std::vector<double> saved_params;
     std::vector<double> grad;
+    std::vector<double> prev_grad;
 
     struct SatStats {
         bool strict_ok;
@@ -198,8 +198,8 @@ struct Terms {
             grad.push_back(0.0);
         }
 
-        params1.resize(params.size());
-        params2.resize(params.size());
+        saved_params.resize(params.size());
+        prev_grad.resize(params.size());
 
         auto m = [](size_t i){return i;};
         auto b = [n](size_t i){return i + n;};
@@ -295,7 +295,7 @@ struct Terms {
             result += v*v;
         }
 
-        return sqrt(result);
+        return result;
     }
 
     void step(double v)
@@ -501,14 +501,18 @@ int main(int argc, char** argv) {
     size_t iter_done = 0;
     const double STEP_DEC = 0.5;
     const double STEP_INC = 1.1;
+    const double ARMIJO_C = 0.5;
     const double STEP_MIN = 1e-14;
     const double STEP_MAX = 1.0;
+    terms.calc_grad();
     for (size_t i = 0; unlimited_steps || i < max_steps_limit; ++i)
     {
+        terms.prev_grad = terms.grad;
         iter_done = i;
         double val = terms.value();
         if (val < best_result) best_result = val;
-        double grad = terms.calc_grad(); // also updates terms.grad buffer
+        double grad2 = terms.calc_grad(); // also updates terms.grad buffer
+        double grad = std::sqrt(grad2);
         if (LOG_EVERY != 0 && i % LOG_EVERY == 0) {
             auto st = terms.sat_stats();
             if (log_format == LogFormat::Full) {
@@ -546,33 +550,42 @@ int main(int argc, char** argv) {
             prev_satisfied = st.strict_ok;
         }
 
-        // Backtracking line search along -grad direction.
-        terms.params1 = terms.params;
-        double alpha = std::min(std::max(step, STEP_MIN), STEP_MAX);
-        double new_val = val;
+        // Armijo backtracking; BB update on accepted step.
         bool accepted = false;
-        while (alpha >= STEP_MIN) {
-            terms.params = terms.params1;
+        for (int j = 0; j < 100; ++j) {
+            double alpha = std::min(std::max(step, STEP_MIN), STEP_MAX);
+            terms.saved_params = terms.params;
             terms.step(alpha);
-            new_val = terms.value();
-            if (new_val < val) {
-                accepted = true;
-                break;
+            double new_val = terms.value();
+
+            if (new_val - val > -ARMIJO_C * alpha * grad2) {
+                step = alpha * STEP_DEC;
+                terms.params = terms.saved_params;
+                continue;
             }
-            alpha *= STEP_DEC;
+
+            double dgrad_dot_dx = 0.0;
+            for (size_t k = 0; k < terms.grad.size(); ++k) {
+                dgrad_dot_dx += (terms.grad[k] - terms.prev_grad[k]) * terms.grad[k];
+            }
+            if (dgrad_dot_dx > 0.0) {
+                step = std::min(std::max(alpha * (grad2 / dgrad_dot_dx), STEP_MIN), STEP_MAX);
+            } else {
+                step = std::min(alpha * STEP_INC, STEP_MAX);
+            }
+            accepted = true;
+            break;
         }
         if (!accepted) {
-            terms.params = terms.params1;
             break; // can't find a decreasing step; report in SUMMARY
         }
-        step = std::min(alpha * STEP_INC, STEP_MAX);
     }
 
     {
         // Final snapshot: everything needed for reading the result without scanning logs.
         // calc_grad() updates internal grad buffer; compute it before printing summary.
         double final_val = terms.value();
-        double final_grad = terms.calc_grad();
+        double final_grad = std::sqrt(terms.calc_grad());
         auto st = terms.sat_stats();
         if (st.strict_ok) {
             std::cerr
