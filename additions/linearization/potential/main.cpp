@@ -4,7 +4,9 @@
 #include <algorithm>
 #include <cmath>
 #include <sstream>
+#include <fstream>
 #include <limits>
+#include <iomanip>
 
 struct OMatrix {
     std::vector<std::vector<size_t>> intersections;
@@ -44,8 +46,36 @@ std::vector<size_t> gens_str_to_vec(const std::string& s) {
     return numbers;
 }
 
-const double MIN_EDGE = 1.0;
-const double MIN_ANGLE = 0.001;
+static void print_usage(const char* argv0) {
+    std::cerr
+        << "Usage:\n"
+        << "  " << argv0 << " --gens \"0 1 0 2 ...\"\n"
+        << "  " << argv0 << " --gens-file path/to/gens.txt\n"
+        << "  " << argv0 << " 0 1 0 2 ...\n"
+        << "  " << argv0 << " [--max-steps N] [--log-every N] [--step X]\n"
+        << "       [--min-edge X] [--min-angle X]\n"
+        << "       [--log-format compact|full]\n"
+        << "\n"
+        << "Notes:\n"
+        << "  Default is 'no limit' on iterations.\n"
+        << "  --max-steps N sets a limit; --max-steps 0 means 'no limit'.\n"
+        << "\n"
+        << "Generators are 0-indexed adjacent swaps (s_i swaps i and i+1).\n";
+}
+
+static bool read_file(const std::string& path, std::string& out) {
+    std::ifstream in(path);
+    if (!in) return false;
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    out = ss.str();
+    return true;
+}
+
+// "Margin" used in hinge penalties max(raw + min_*, 0)^2.
+// Strict feasibility is always checked against raw < 0.
+static double g_min_edge = 1.0;
+static double g_min_angle = 0.001;
 
 struct EdgeTerm {
     size_t p1, p2, p3, p4, p5, p6, p7, p8;
@@ -61,7 +91,7 @@ struct EdgeTerm {
 
     double value1(const std::vector<double> &params) const
     {
-        double result = raw(params) + MIN_EDGE;
+        double result = raw(params) + g_min_edge;
 
         if (result < 0.0)
             return 0.0;
@@ -113,7 +143,7 @@ struct AngleTerm {
     }
 
     double value1(const std::vector<double> &params) const {
-        double result = raw(params) + MIN_ANGLE;
+        double result = raw(params) + g_min_angle;
         if (result < 0.0)
             return 0.0;
 
@@ -147,6 +177,15 @@ struct Terms {
     std::vector<double> params2;
     std::vector<double> grad;
 
+    struct SatStats {
+        bool strict_ok;
+        bool margin_ok;
+        size_t strict_violations;
+        size_t margin_violations;
+        double worst_raw;        // max raw (should be < 0 for strict)
+        double worst_shifted;    // max(raw + MIN_*) (should be < 0 for margin_ok)
+    };
+
     Terms(OMatrix &o) {
         size_t n = o.n;
 
@@ -172,6 +211,9 @@ struct Terms {
 
         for (size_t i = 0; i < o.n; ++i) {
             auto &line = o.intersections[i];
+            if (line.size() < 2) {
+                continue;
+            }
 
             for (size_t ind = 0; ind < line.size() - 1; ++ind) {
                 size_t j = line[ind];
@@ -284,6 +326,46 @@ struct Terms {
         return true;
     }
 
+    SatStats sat_stats() const {
+        SatStats st;
+        st.strict_ok = true;
+        st.margin_ok = true;
+        st.strict_violations = 0;
+        st.margin_violations = 0;
+        st.worst_raw = -std::numeric_limits<double>::infinity();
+        st.worst_shifted = -std::numeric_limits<double>::infinity();
+
+        for (const auto& t : angleTerms) {
+            double r = t.raw(params);
+            st.worst_raw = std::max(st.worst_raw, r);
+            st.worst_shifted = std::max(st.worst_shifted, r + g_min_angle);
+            if (!(r < 0.0)) {
+                st.strict_ok = false;
+                st.strict_violations++;
+            }
+            if (!((r + g_min_angle) < 0.0)) {
+                st.margin_ok = false;
+                st.margin_violations++;
+            }
+        }
+
+        for (const auto& t : edgeTerms) {
+            double r = t.raw(params);
+            st.worst_raw = std::max(st.worst_raw, r);
+            st.worst_shifted = std::max(st.worst_shifted, r + g_min_edge);
+            if (!(r < 0.0)) {
+                st.strict_ok = false;
+                st.strict_violations++;
+            }
+            if (!((r + g_min_edge) < 0.0)) {
+                st.margin_ok = false;
+                st.margin_violations++;
+            }
+        }
+
+        return st;
+    }
+
     void print() {
         size_t n = params.size() / 2;
         for (size_t i = 0; i < n; ++i) {
@@ -297,68 +379,237 @@ struct Terms {
     }
 };
 
-int main() {
-    OMatrix o = makeOMatrix(gens_str_to_vec("1 3 5 7 9 11 13 15 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0 1 3 5 7 9 11 13 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 3 5 7 9 11 13 15 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 3 5 7 9 11 13 12 11 10 9 8 7 6 5 4 3 5 7 9 11 10 9 8 7 6 5 7 9 11 13 12 11 13 15 14 13 12 11 10 9 8 7 9 11 13 15 17 16 15 14 13 12 11 10 9 8 7 6 5 4 5 7 6 7 9 8 7 9 11 13 15 14 13 12 11 13 15 17 16 15 14 13 12 11 10 9 8 9 11 10 12 1 3 5 7 9 11 13 15 17"));
-    Terms terms{o};
+int main(int argc, char** argv) {
+    std::string gens_str =
+        "1 3 5 7 9 11 13 15 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0 1 3 5 7 9 11 13 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 3 5 7 9 11 13 15 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 3 5 7 9 11 13 12 11 10 9 8 7 6 5 4 3 5 7 9 11 10 9 8 7 6 5 7 9 11 13 12 11 13 15 14 13 12 11 10 9 8 7 9 11 13 15 17 16 15 14 13 12 11 10 9 8 7 6 5 4 5 7 6 7 9 8 7 9 11 13 15 14 13 12 11 13 15 17 16 15 14 13 12 11 10 9 8 9 11 10 12 1 3 5 7 9 11 13 15 17";
 
+    size_t max_steps_limit = 0;
+    size_t LOG_EVERY = 10000;
     double step = 0.01;
-    double best_result = std::numeric_limits<double>::infinity();
-    bool prev_satisfied = false;
-    size_t MAX_STEPS = 10000000;
-    double STEP_MUL = 1.618;
-    for (size_t i = 0; i < MAX_STEPS; ++i)
-    {
-        double val = terms.value();
-        double grad = terms.calc_grad();
-        if (i % 10000 == 0) {
-            bool satisfied = terms.satisfied();
-            std::cout << i << "] V " << val << " | GRAD " << grad << " | STEP " << step << " | RES "
-                      << terms.satisfied() << std::endl;
-
-            if (val < best_result) {
-                best_result = val;
-                if (satisfied && prev_satisfied)
-                    break;
-
-                prev_satisfied = satisfied;
-            }
-            else
-            {
-                std::cout << "FAIL" << std::endl;
-            }
+    enum class LogFormat { Compact, Full };
+    LogFormat log_format = LogFormat::Compact;
+    bool unlimited_steps = true;
+    for (int argi = 1; argi < argc; ++argi) {
+        std::string arg = argv[argi];
+        if (arg == "--help" || arg == "-h") {
+            print_usage(argv[0]);
+            return 0;
         }
-
-        {
-            terms.params1 = terms.params;
-            terms.params2 = terms.params;
-
-            terms.step(step * STEP_MUL);
-            double v2 = terms.value();
-            std::swap(terms.params1, terms.params);
-
-            terms.step(step / STEP_MUL);
-            double v3 = terms.value();
-            std::swap(terms.params2, terms.params);
-
-            if (v2 < val && v2 < v3)
-            {
-                step *= STEP_MUL;
-                terms.params = terms.params1;
+        if (arg == "--gens") {
+            if (argi + 1 >= argc) {
+                std::cerr << "Missing value for --gens\n";
+                print_usage(argv[0]);
+                return 2;
             }
-            else if (v3 < val && v3 < v2)
-            {
-                step /= STEP_MUL;
-                terms.params = terms.params2;
-            }
-            else
-            {
-                step *= 0.5;
-            }
+            gens_str = argv[++argi];
+            continue;
         }
+        if (arg == "--gens-file") {
+            if (argi + 1 >= argc) {
+                std::cerr << "Missing value for --gens-file\n";
+                print_usage(argv[0]);
+                return 2;
+            }
+            std::string file_contents;
+            if (!read_file(argv[++argi], file_contents)) {
+                std::cerr << "Failed to read file\n";
+                return 2;
+            }
+            gens_str = file_contents;
+            continue;
+        }
+        if (arg == "--max-steps") {
+            if (argi + 1 >= argc) {
+                std::cerr << "Missing value for --max-steps\n";
+                return 2;
+            }
+            max_steps_limit = (size_t)std::stoull(argv[++argi]);
+            if (max_steps_limit == 0) {
+                unlimited_steps = true;
+            } else {
+                unlimited_steps = false;
+            }
+            continue;
+        }
+        if (arg == "--log-every") {
+            if (argi + 1 >= argc) {
+                std::cerr << "Missing value for --log-every\n";
+                return 2;
+            }
+            LOG_EVERY = (size_t)std::stoull(argv[++argi]);
+            continue;
+        }
+        if (arg == "--log-format") {
+            if (argi + 1 >= argc) {
+                std::cerr << "Missing value for --log-format\n";
+                return 2;
+            }
+            std::string v = argv[++argi];
+            if (v == "compact") log_format = LogFormat::Compact;
+            else if (v == "full") log_format = LogFormat::Full;
+            else {
+                std::cerr << "Unknown --log-format: " << v << "\n";
+                return 2;
+            }
+            continue;
+        }
+        if (arg == "--step") {
+            if (argi + 1 >= argc) {
+                std::cerr << "Missing value for --step\n";
+                return 2;
+            }
+            step = std::stod(argv[++argi]);
+            continue;
+        }
+        if (arg == "--min-edge") {
+            if (argi + 1 >= argc) {
+                std::cerr << "Missing value for --min-edge\n";
+                return 2;
+            }
+            g_min_edge = std::stod(argv[++argi]);
+            continue;
+        }
+        if (arg == "--min-angle") {
+            if (argi + 1 >= argc) {
+                std::cerr << "Missing value for --min-angle\n";
+                return 2;
+            }
+            g_min_angle = std::stod(argv[++argi]);
+            continue;
+        }
+        if (!arg.empty() && arg[0] != '-') {
+            // Positional numbers: ./prog 1 3 5 ...
+            std::ostringstream ss;
+            ss << arg;
+            for (int j = argi + 1; j < argc; ++j) {
+                ss << ' ' << argv[j];
+            }
+            gens_str = ss.str();
+            break;
+        }
+        std::cerr << "Unknown option: " << arg << "\n";
+        print_usage(argv[0]);
+        return 2;
     }
 
-    if (!terms.satisfied())
-        std::cerr << "FAILED" << std::endl;
+    auto gens = gens_str_to_vec(gens_str);
+    OMatrix o = makeOMatrix(gens);
+    Terms terms{o};
+
+    double best_result = std::numeric_limits<double>::infinity();
+    bool prev_satisfied = false;
+    size_t iter_done = 0;
+    const double STEP_DEC = 0.5;
+    const double STEP_INC = 1.1;
+    const double STEP_MIN = 1e-14;
+    const double STEP_MAX = 1.0;
+    for (size_t i = 0; unlimited_steps || i < max_steps_limit; ++i)
+    {
+        iter_done = i;
+        double val = terms.value();
+        if (val < best_result) best_result = val;
+        double grad = terms.calc_grad(); // also updates terms.grad buffer
+        if (LOG_EVERY != 0 && i % LOG_EVERY == 0) {
+            auto st = terms.sat_stats();
+            if (log_format == LogFormat::Full) {
+                std::cout
+                    << i
+                    << "] V " << val
+                    << " | GRAD " << grad
+                    << " | STEP " << step
+                    << " | STRICT " << (st.strict_ok ? 1 : 0)
+                    << " | MARGIN " << (st.margin_ok ? 1 : 0)
+                    << " | worst_raw " << st.worst_raw
+                    << " | worst_shifted " << st.worst_shifted
+                    << " | viol(strict) " << st.strict_violations
+                    << " | viol(margin) " << st.margin_violations
+                    << std::endl;
+            } else {
+                // Compact: focus on what matters for convergence.
+                // Fixed-width columns for easy diff/scan.
+                // All floats use scientific notation to keep width stable across magnitudes.
+                std::cout << std::setw(8) << i
+                          << " V=" << std::setw(13) << std::scientific << std::setprecision(6) << val
+                          << " G=" << std::setw(11) << std::scientific << std::setprecision(3) << grad
+                          << " step=" << std::setw(11) << std::scientific << std::setprecision(3) << step
+                          << " wr=" << std::setw(11) << std::scientific << std::setprecision(3) << st.worst_raw
+                          << " vS=" << std::setw(3) << std::dec << st.strict_violations
+                          << " S=" << (st.strict_ok ? 1 : 0)
+                          << std::defaultfloat
+                          << std::endl;
+            }
+
+            if (st.strict_ok && prev_satisfied) {
+                iter_done = i;
+                break;
+            }
+            prev_satisfied = st.strict_ok;
+        }
+
+        // Backtracking line search along -grad direction.
+        terms.params1 = terms.params;
+        double alpha = std::min(std::max(step, STEP_MIN), STEP_MAX);
+        double new_val = val;
+        bool accepted = false;
+        while (alpha >= STEP_MIN) {
+            terms.params = terms.params1;
+            terms.step(alpha);
+            new_val = terms.value();
+            if (new_val < val) {
+                accepted = true;
+                break;
+            }
+            alpha *= STEP_DEC;
+        }
+        if (!accepted) {
+            terms.params = terms.params1;
+            break; // can't find a decreasing step; report in SUMMARY
+        }
+        step = std::min(alpha * STEP_INC, STEP_MAX);
+    }
+
+    {
+        // Final snapshot: everything needed for reading the result without scanning logs.
+        // calc_grad() updates internal grad buffer; compute it before printing summary.
+        double final_val = terms.value();
+        double final_grad = terms.calc_grad();
+        auto st = terms.sat_stats();
+        if (st.strict_ok) {
+            std::cerr
+                << "SAT_FOUND"
+                << " strict=1"
+                << " margin=" << (st.margin_ok ? 1 : 0)
+                << " worst_raw=" << st.worst_raw
+                << " worst_shifted=" << st.worst_shifted
+                << "\n";
+        } else {
+            std::cerr
+                << "NO_SAT_FOUND"
+                << " strict=0"
+                << " margin=" << (st.margin_ok ? 1 : 0)
+                << " worst_raw=" << st.worst_raw
+                << " worst_shifted=" << st.worst_shifted
+                << "\n";
+        }
+
+        std::cerr
+            << "SUMMARY"
+            << " n=" << o.n
+            << " gens=" << gens.size()
+            << " iter=" << iter_done
+            << " max_iter=" << (unlimited_steps ? "inf" : std::to_string(max_steps_limit))
+            << " V=" << final_val
+            << " GRAD=" << final_grad
+            << " STEP=" << step
+            << " STRICT=" << (st.strict_ok ? 1 : 0)
+            << " MARGIN=" << (st.margin_ok ? 1 : 0)
+            << " worst_raw=" << st.worst_raw
+            << " worst_shifted=" << st.worst_shifted
+            << " viol_strict=" << st.strict_violations
+            << " viol_margin=" << st.margin_violations
+            << " best_V=" << best_result
+            << "\n";
+    }
 
     terms.print();
 
