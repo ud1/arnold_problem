@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Line Configuration Viewer</title>
+  <style>
+    :root {
+      --bg: #f3efe7;
+      --panel: #fcfaf7;
+      --ink: #1f1d1a;
+      --muted: #786f63;
+      --accent: #0f766e;
+      --line: #c9beb0;
+      --black: #0f0f10;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1400px 800px at 0% 100%, #ebe3d5 0%, transparent 70%),
+        radial-gradient(1200px 700px at 100% 0%, #e4efe8 0%, transparent 62%),
+        var(--bg);
+    }
+    .app {
+      height: 100%;
+      display: grid;
+      grid-template-columns: minmax(420px, 1fr) 380px;
+      gap: 10px;
+      padding: 10px;
+    }
+    .viewer {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 12px;
+      overflow: hidden;
+      min-height: 300px;
+      position: relative;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 12px;
+      overflow: auto;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      letter-spacing: 0.01em;
+    }
+    .section {
+      padding-top: 10px;
+      margin-top: 10px;
+    }
+    .section h2 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 180px;
+      resize: vertical;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+      padding: 8px;
+      background: #fff;
+      color: var(--ink);
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      margin: 6px 0;
+    }
+    .row > label { font-size: 13px; }
+    .row input[type="number"] {
+      width: 88px;
+      padding: 4px 6px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-size: 12px;
+      background: #fff;
+    }
+    .row input[type="range"] { width: 100%; }
+    .pair {
+      display: grid;
+      grid-template-columns: 1fr 92px;
+      gap: 8px;
+      align-items: center;
+    }
+    .buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .cmd-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .cmd-grid button { width: 100%; }
+    button {
+      border: 1px solid #9cb4ac;
+      background: #e8f4f1;
+      color: #0e514b;
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    button.secondary {
+      border-color: var(--line);
+      background: #fff;
+      color: #3d382f;
+    }
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 8px 0 4px;
+      line-height: 1.4;
+    }
+    .status {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      min-height: 72px;
+    }
+    svg { width: 100%; height: 100%; display: block; touch-action: none; }
+    @media (max-width: 980px) {
+      .app { grid-template-columns: 1fr; grid-template-rows: 58vh 42vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="viewer" id="viewer">
+      <svg id="svgRoot" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <clipPath id="viewportClip"><rect id="clipRect" x="0" y="0" width="100" height="100" /></clipPath>
+        </defs>
+        <rect id="bgRect" x="0" y="0" width="100%" height="100%" fill="#ffffff" />
+        <g id="viewportGroup" clip-path="url(#viewportClip)">
+          <g id="sceneGroup">
+            <g id="polyLayer"></g>
+            <g id="lineLayer"></g>
+          </g>
+        </g>
+      </svg>
+    </div>
+
+    <aside class="panel">
+      <h1>Line Viewer</h1>
+
+      <div class="section">
+        <h2>Вход</h2>
+        <textarea id="inputLog" spellcheck="false" placeholder="#LINES_BEGIN\nm,b\n-28.3,-15.8\n...\n#LINES_END"></textarea>
+        <div class="buttons">
+          <button id="parseBtn">Распарсить</button>
+          <button id="fitBtn" class="secondary">Fit</button>
+          <button id="resetViewBtn" class="secondary">Reset View</button>
+          <button id="exportBtn">Экспорт SVG</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Режим</h2>
+        <div class="buttons">
+          <label><input type="checkbox" id="checkerMode" checked /> Шахматная раскраска</label>
+          <label><input type="checkbox" id="showOuter" checked /> Внешние области</label>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h2>Geometry Transform</h2>
+          <button id="resetTransformBtn" class="secondary">Reset Transform</button>
+        </div>
+        <div class="hint">Команды применяются в экранных координатах относительно центра viewport.</div>
+        <div class="cmd-grid">
+          <button id="rotLeftBtn" class="secondary">↺ Rotate -10°</button>
+          <button id="rotRightBtn" class="secondary">↻ Rotate +10°</button>
+          <button id="stretchXDownBtn" class="secondary">↔ X -10%</button>
+          <button id="stretchXUpBtn" class="secondary">↔ X +10%</button>
+          <button id="stretchYDownBtn" class="secondary">↕ Y -10%</button>
+          <button id="stretchYUpBtn" class="secondary">↕ Y +10%</button>
+          <button id="skewXLeftBtn" class="secondary">Skew X -6°</button>
+          <button id="skewXRightBtn" class="secondary">Skew X +6°</button>
+          <button id="skewYDownBtn" class="secondary">Skew Y -6°</button>
+          <button id="skewYUpBtn" class="secondary">Skew Y +6°</button>
+          <button id="mirrorXBtn" class="secondary">⇋ Mirror X</button>
+          <button id="mirrorYBtn" class="secondary">⇅ Mirror Y</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Статус</h2>
+        <div id="status" class="status"></div>
+      </div>
+    </aside>
+  </div>
+
+  <script src="js/state.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/cells.js"></script>
+  <script src="js/matrix.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/controls.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
