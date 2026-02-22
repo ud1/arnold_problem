@@ -377,6 +377,14 @@ struct Terms {
             std::cout << b << std::endl;
         }
     }
+
+    void print_csv(std::ostream& out) const {
+        size_t n = params.size() / 2;
+        out << "m,b\n";
+        for (size_t i = 0; i < n; ++i) {
+            out << params[i] << "," << params[i + n] << "\n";
+        }
+    }
 };
 
 int main(int argc, char** argv) {
@@ -504,6 +512,7 @@ int main(int argc, char** argv) {
     const double ARMIJO_C = 0.5;
     const double STEP_MIN = 1e-14;
     const double STEP_MAX = 1.0;
+    std::cout << "#LOG_BEGIN\n";
     terms.calc_grad();
     for (size_t i = 0; unlimited_steps || i < max_steps_limit; ++i)
     {
@@ -580,6 +589,7 @@ int main(int argc, char** argv) {
             break; // can't find a decreasing step; report in SUMMARY
         }
     }
+    std::cout << "#LOG_END\n";
 
     {
         // Final snapshot: everything needed for reading the result without scanning logs.
@@ -587,8 +597,9 @@ int main(int argc, char** argv) {
         double final_val = terms.value();
         double final_grad = std::sqrt(terms.calc_grad());
         auto st = terms.sat_stats();
+        std::cout << "#RESULT_BEGIN\n";
         if (st.strict_ok) {
-            std::cerr
+            std::cout
                 << "SAT_FOUND"
                 << " strict=1"
                 << " margin=" << (st.margin_ok ? 1 : 0)
@@ -596,7 +607,7 @@ int main(int argc, char** argv) {
                 << " worst_shifted=" << st.worst_shifted
                 << "\n";
         } else {
-            std::cerr
+            std::cout
                 << "NO_SAT_FOUND"
                 << " strict=0"
                 << " margin=" << (st.margin_ok ? 1 : 0)
@@ -605,7 +616,7 @@ int main(int argc, char** argv) {
                 << "\n";
         }
 
-        std::cerr
+        std::cout
             << "SUMMARY"
             << " n=" << o.n
             << " gens=" << gens.size()
@@ -622,9 +633,12 @@ int main(int argc, char** argv) {
             << " viol_margin=" << st.margin_violations
             << " best_V=" << best_result
             << "\n";
+        std::cout << "#RESULT_END\n";
     }
 
-    terms.print();
+    std::cout << "#LINES_BEGIN\n";
+    terms.print_csv(std::cout);
+    std::cout << "#LINES_END\n";
 
     return 0;
 }
