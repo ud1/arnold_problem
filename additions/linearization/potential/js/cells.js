@@ -311,12 +311,13 @@
     return cells.map(c => {
       const external = hasUnboundedDirection(c.signs, lines);
       const finiteSides = countFiniteSides(c.poly, lines);
+      const sideCount = external ? (finiteSides + 1) : c.poly.length;
       return {
         poly: c.poly,
         area: c.area,
         parity: c.parity,
         external,
-        sideCount: finiteSides + (external ? 1 : 0),
+        sideCount,
       };
     });
   };

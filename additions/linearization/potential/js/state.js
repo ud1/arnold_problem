@@ -12,7 +12,9 @@
     geoMatrix: [1, 0, 0, 1, 0, 0],
     flags: {
       checkerMode: true,
+      coloredMode: false,
       showOuter: true,
+      showPoints: false,
     },
     pivot: { x: 0, y: 0 },
     _invertColor: false,
@@ -26,6 +28,7 @@
     sceneGroup: document.getElementById("sceneGroup"),
     polyLayer: document.getElementById("polyLayer"),
     lineLayer: document.getElementById("lineLayer"),
+    pointLayer: document.getElementById("pointLayer"),
     clipRect: document.getElementById("clipRect"),
     statusEl: document.getElementById("status"),
   };

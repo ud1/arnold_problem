@@ -7,22 +7,43 @@
     const source = blockMatch ? blockMatch[1] : text;
     const lines = source.split(/\r?\n/);
     const pairs = [];
-    const csvRe = /^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*,\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*$/;
-    const yRe = /^\s*y\s*=\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\*?\s*x\s*([+-]\s*(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*$/i;
+
+    const num = "[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?";
+    const csvRe = new RegExp(`^\\s*(${num})\\s*,\\s*(${num})\\s*$`);
+    const tupleLineRe = new RegExp(`^\\s*\\(\\s*(${num})\\s*,\\s*(${num})\\s*\\)\\s*,?\\s*$`);
+    const yRe = new RegExp(`^\\s*y\\s*=\\s*(${num})\\s*\\*?\\s*x\\s*([+-]\\s*(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?)\\s*$`, "i");
 
     for (const raw of lines) {
       const s = raw.trim();
       if (!s || s.toLowerCase() === "m,b") continue;
+
       let m = s.match(csvRe);
       if (m) {
         pairs.push({ m: parseFloat(m[1]), b: parseFloat(m[2]) });
         continue;
       }
+
+      m = s.match(tupleLineRe);
+      if (m) {
+        pairs.push({ m: parseFloat(m[1]), b: parseFloat(m[2]) });
+        continue;
+      }
+
       m = s.match(yRe);
       if (m) {
         pairs.push({ m: parseFloat(m[1]), b: parseFloat(m[2].replace(/\s+/g, "")) });
       }
     }
+
+    // Fallback for compact tuple list formats like: [(m,b), (m,b), ...]
+    if (!pairs.length) {
+      const tupleGlobalRe = new RegExp(`\\(\\s*(${num})\\s*,\\s*(${num})\\s*\\)`, "g");
+      let m;
+      while ((m = tupleGlobalRe.exec(source)) !== null) {
+        pairs.push({ m: parseFloat(m[1]), b: parseFloat(m[2]) });
+      }
+    }
+
     return pairs;
   };
 
