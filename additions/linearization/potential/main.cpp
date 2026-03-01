@@ -8,6 +8,10 @@
 #include <limits>
 #include <iomanip>
 #include <array>
+#include <cctype>
+#include <optional>
+#include <stdexcept>
+#include <unistd.h>
 
 struct OMatrix {
     std::vector<std::vector<size_t>> intersections;
@@ -52,12 +56,21 @@ static void print_usage(const char* argv0) {
         << "Usage:\n"
         << "  " << argv0 << " --gens \"0 1 0 2 ...\"\n"
         << "  " << argv0 << " --gens-file path/to/gens.txt\n"
+        << "  " << argv0 << " --axis-pair [I,J] [--axis-eps E] --gens \"...\"\n"
         << "  " << argv0 << " 0 1 0 2 ...\n"
-        << "  " << argv0 << " [--max-steps N]\n"
+        << "  cat input.txt | " << argv0 << " [--max-steps N]\n"
+        << "  " << argv0 << " [--max-steps N] [--axis-pair [I,J]] [--axis-eps E] [--min-angle A] [--require-margin] [--metadata-only]\n"
         << "\n"
         << "Notes:\n"
         << "  Default is 'no limit' on iterations.\n"
         << "  --max-steps N sets a limit; --max-steps 0 means 'no limit'.\n"
+        << "  --axis-pair I,J enables fixed-slope axis mode for adjacent lines I and J.\n"
+        << "  --axis-pair without I,J fixes boundary lines 0 and n-1 near vertical.\n"
+        << "  --axis-eps E sets axis half-gap in angle space (default: 0.0001).\n"
+        << "  --min-angle A sets the angle-margin penalty threshold in slope-space (default: 0.01).\n"
+        << "  --require-margin treats SAT as success only when margin checks pass.\n"
+        << "  --metadata-only suppresses generator output in pipe mode.\n"
+        << "  In pipe mode each case may have an optional prefix ending with ')'.\n"
         << "  Optimization/logging hyperparameters are fixed in code.\n"
         << "\n"
         << "Generators are 0-indexed adjacent swaps (s_i swaps i and i+1).\n";
@@ -70,6 +83,100 @@ static bool read_file(const std::string& path, std::string& out) {
     ss << in.rdbuf();
     out = ss.str();
     return true;
+}
+
+static std::string trim_copy(const std::string& s) {
+    size_t l = 0;
+    while (l < s.size() && std::isspace((unsigned char)s[l])) ++l;
+    size_t r = s.size();
+    while (r > l && std::isspace((unsigned char)s[r - 1])) --r;
+    return s.substr(l, r - l);
+}
+
+static bool is_numbers_only_line(const std::string& s) {
+    bool has_digit = false;
+    for (char c : s) {
+        if (std::isdigit((unsigned char)c)) {
+            has_digit = true;
+            continue;
+        }
+        if (!std::isspace((unsigned char)c)) {
+            return false;
+        }
+    }
+    return has_digit;
+}
+
+static std::vector<size_t> extract_nonnegative_ints(const std::string& s) {
+    std::vector<size_t> out;
+    unsigned long long cur = 0;
+    bool in_num = false;
+    for (char c : s) {
+        if (std::isdigit((unsigned char)c)) {
+            in_num = true;
+            cur = cur * 10ULL + (unsigned long long)(c - '0');
+        } else if (in_num) {
+            out.push_back((size_t)cur);
+            cur = 0;
+            in_num = false;
+        }
+    }
+    if (in_num) {
+        out.push_back((size_t)cur);
+    }
+    return out;
+}
+
+static bool parse_axis_pair_spec(const std::string& s, size_t& left, size_t& right) {
+    auto nums = extract_nonnegative_ints(s);
+    if (nums.size() != 2) return false;
+    left = nums[0];
+    right = nums[1];
+    if (left > right) std::swap(left, right);
+    return true;
+}
+
+static std::vector<std::vector<size_t>> parse_filter_cases_from_stdin(std::istream& in) {
+    std::vector<std::vector<size_t>> cases;
+    std::vector<size_t> current;
+    bool active = false;
+    std::string line;
+
+    while (std::getline(in, line)) {
+        size_t close_paren_pos = line.find(')');
+        if (close_paren_pos != std::string::npos) {
+            if (!current.empty()) {
+                cases.push_back(current);
+                current.clear();
+            }
+            active = true;
+            std::string tail = line.substr(close_paren_pos + 1);
+            auto nums = extract_nonnegative_ints(tail);
+            current.insert(current.end(), nums.begin(), nums.end());
+            continue;
+        }
+
+        if (active) {
+            auto nums = extract_nonnegative_ints(line);
+            current.insert(current.end(), nums.begin(), nums.end());
+            continue;
+        }
+
+        std::string trimmed = trim_copy(line);
+        if (trimmed.empty()) continue;
+        if (is_numbers_only_line(trimmed)) {
+            auto nums = extract_nonnegative_ints(trimmed);
+            if (!nums.empty()) {
+                active = true;
+                current.insert(current.end(), nums.begin(), nums.end());
+            }
+        }
+    }
+
+    if (!current.empty()) {
+        cases.push_back(current);
+    }
+    return cases;
 }
 
 // "Margin" used in hinge penalties max(raw + min_*, 0)^2.
@@ -88,6 +195,14 @@ static double g_reg_lse_temperature = 5.0;
 static double g_reg_activation_loss = 1e-3;
 static double g_reg_scale_smooth = 0.02;
 static double g_reg_runtime_scale = 0.0;
+
+struct AxisModeConfig {
+    bool enabled = false;
+    bool boundary_pair = false;
+    size_t left = 0;
+    size_t right = 0;
+    double eps = 1e-4;
+};
 
 struct EdgeTerm {
     size_t p1, p2, p3, p4, p5, p6, p7, p8;
@@ -189,6 +304,10 @@ struct Terms {
     std::vector<double> grad;
     std::vector<double> prev_grad;
     size_t n;
+    bool freeze_m = false;
+    bool freeze_axis_b = false;
+    size_t axis_left = 0;
+    size_t axis_right = 0;
 
     struct SatStats {
         bool strict_ok;
@@ -360,7 +479,7 @@ struct Terms {
         return soft_log_max - soft_log_min;
     }
 
-    Terms(OMatrix &o) {
+    Terms(OMatrix &o, const AxisModeConfig& axis_mode = AxisModeConfig{}) {
         n = o.n;
 
         for (size_t i = 0; i < o.n; ++i) {
@@ -379,9 +498,96 @@ struct Terms {
         auto m = [](size_t i){return i;};
         auto b = [line_count](size_t i){return i + line_count;};
 
+        if (!axis_mode.enabled) {
+            for (size_t i = 0; i < o.n - 1; ++i) {
+                angleTerms.emplace_back(m(i), m(i + 1));
+            }
+        } else {
+            if (n < 2) {
+                throw std::runtime_error("Axis mode requires at least 2 lines");
+            }
+            if (!(axis_mode.eps > 0.0)) {
+                throw std::runtime_error("Axis eps must be > 0");
+            }
+            const double pi = std::acos(-1.0);
+            const double half_pi = pi * 0.5;
 
-        for (size_t i = 0; i < o.n-1; ++i) {
-            angleTerms.emplace_back(m(i), m(i + 1));
+            if (axis_mode.boundary_pair) {
+                const size_t axis_left = 0;
+                const size_t axis_right = n - 1;
+                const double delta = pi / (2.0 * static_cast<double>(n - 1));
+                const double eps_max = pi / static_cast<double>(n - 1);
+                if (axis_mode.eps >= eps_max) {
+                    throw std::runtime_error("Boundary axis mode requires eps < pi/(n-1)");
+                }
+
+                for (size_t i = 0; i < n; ++i) {
+                    double theta = 0.0;
+                    if (i == axis_left) {
+                        theta = -half_pi + axis_mode.eps;
+                    } else if (i == axis_right) {
+                        theta = half_pi - axis_mode.eps;
+                    } else {
+                        size_t mid_i = i - 1;
+                        double q = static_cast<double>(2 * mid_i) - static_cast<double>(n - 3);
+                        theta = q * delta;
+                    }
+
+                    double abs_theta = std::abs(theta);
+                    if (abs_theta >= (half_pi - 1e-12)) {
+                        throw std::runtime_error("Boundary axis placement makes some angles reach pi/2; choose smaller eps");
+                    }
+                    params[i] = std::tan(theta);
+                }
+
+                freeze_m = true;
+                freeze_axis_b = true;
+                this->axis_left = axis_left;
+                this->axis_right = axis_right;
+                params[axis_left + n] = 0.0;
+                params[axis_right + n] = 0.0;
+            } else {
+                if (axis_mode.right != axis_mode.left + 1) {
+                    throw std::runtime_error("Axis pair must be adjacent: J = I + 1");
+                }
+                if (axis_mode.right >= n) {
+                    throw std::runtime_error("Axis pair index is out of range for this case");
+                }
+                const size_t axis_left = axis_mode.left;
+                const size_t axis_right = axis_mode.right;
+                const double delta = pi / (2.0 * static_cast<double>(n - 1));
+                if (axis_mode.eps >= 2.0 * delta) {
+                    throw std::runtime_error("Axis eps must be smaller than pi/(n-1)");
+                }
+
+                for (size_t i = 0; i < n; ++i) {
+                    double theta = 0.0;
+                    const double q_axis = static_cast<double>(2 * axis_left) - static_cast<double>(n - 2);
+                    const double theta_axis = q_axis * delta;
+                    if (i == axis_left) {
+                        theta = theta_axis - axis_mode.eps;
+                    } else if (i == axis_right) {
+                        theta = theta_axis + axis_mode.eps;
+                    } else {
+                        size_t dir_i = (i < axis_left) ? i : (i - 1);
+                        double q = static_cast<double>(2 * dir_i) - static_cast<double>(n - 2);
+                        theta = q * delta;
+                    }
+
+                    double abs_theta = std::abs(theta);
+                    if (abs_theta >= (half_pi - 1e-12)) {
+                        throw std::runtime_error("Axis placement makes some angles reach pi/2; choose a more central axis pair");
+                    }
+                    params[i] = std::tan(theta);
+                }
+
+                freeze_m = true;
+                freeze_axis_b = true;
+                this->axis_left = axis_left;
+                this->axis_right = axis_right;
+                params[axis_left + n] = 0.0;
+                params[axis_right + n] = 0.0;
+            }
         }
 
         for (size_t i = 0; i < o.n; ++i) {
@@ -574,6 +780,15 @@ struct Terms {
         }
 
         double result = 0.0;
+        if (freeze_m) {
+            for (size_t i = 0; i < n; ++i) {
+                grad[i] = 0.0;
+            }
+        }
+        if (freeze_axis_b) {
+            grad[axis_left + n] = 0.0;
+            grad[axis_right + n] = 0.0;
+        }
         for (auto &v : grad)
         {
             result += v*v;
@@ -584,8 +799,21 @@ struct Terms {
 
     void step(double v)
     {
-        size_t size = params.size();
-        for (size_t i = 0; i < size; ++i) {
+        if (freeze_m) {
+            for (size_t i = n; i < params.size(); ++i) {
+                if (freeze_axis_b && (i == axis_left + n || i == axis_right + n)) {
+                    continue;
+                }
+                params[i] -= grad[i] * v;
+            }
+            if (freeze_axis_b) {
+                params[axis_left + n] = 0.0;
+                params[axis_right + n] = 0.0;
+            }
+            return;
+        }
+
+        for (size_t i = 0; i < params.size(); ++i) {
             params[i] -= grad[i] * v;
         }
     }
@@ -736,6 +964,139 @@ struct Terms {
     }
 };
 
+struct FilterSolveResult {
+    bool strict_ok = false;
+    double best_potential = std::numeric_limits<double>::infinity();
+    size_t violated_on_best = 0;
+};
+
+static FilterSolveResult solve_for_filter(Terms& terms, size_t max_steps_limit, bool unlimited_steps, double initial_step) {
+    FilterSolveResult out;
+    double step = initial_step;
+    const double STEP_DEC = 0.5;
+    const double STEP_INC = 1.1;
+    const double ARMIJO_C = 0.5;
+    const double STEP_MIN = 1e-14;
+    const double STEP_MAX_CONSTRAINT = 1e20;
+    const double STEP_MAX_REG = 1.0;
+
+    g_reg_runtime_scale = 0.0;
+    double cval_at_reg_entry = 0.0;
+    bool was_in_reg = false;
+    std::vector<double> best_params = terms.params;
+
+    terms.precompute_intersections();
+    terms.calc_grad();
+    for (size_t i = 0; unlimited_steps || i < max_steps_limit; ++i)
+    {
+        double constraint_val = terms.constraint_value();
+        auto st_iter = terms.sat_stats();
+        double target_reg_scale = 0.0;
+        if (st_iter.strict_ok) {
+            double x = constraint_val / std::max(g_reg_activation_loss, 1e-30);
+            target_reg_scale = 1.0 / (1.0 + x * x);
+        }
+        double smooth = std::clamp(g_reg_scale_smooth, 0.0, 1.0);
+        g_reg_runtime_scale += (target_reg_scale - g_reg_runtime_scale) * smooth;
+
+        bool in_reg = (g_reg_runtime_scale > 0.0);
+        if (in_reg && !was_in_reg) {
+            cval_at_reg_entry = constraint_val;
+        }
+        was_in_reg = in_reg;
+
+        terms.prev_grad = terms.grad;
+        if (g_reg_runtime_scale > 0.0) terms.precompute_intersections();
+        double val = terms.value();
+        double grad2 = terms.calc_grad();
+
+        if (val < out.best_potential) {
+            out.best_potential = val;
+            best_params = terms.params;
+        }
+
+        double step_max = (g_reg_runtime_scale > 0.0) ? STEP_MAX_REG : STEP_MAX_CONSTRAINT;
+        double cval_cap = (g_reg_runtime_scale > 0.0)
+            ? cval_at_reg_entry * 2.0 + 1e-5
+            : std::numeric_limits<double>::infinity();
+        bool accepted = false;
+        for (int j = 0; j < 100; ++j) {
+            double alpha = std::min(std::max(step, STEP_MIN), step_max);
+            terms.saved_params = terms.params;
+            terms.step(alpha);
+            double new_val = terms.value();
+
+            if (new_val - val > -ARMIJO_C * alpha * grad2) {
+                step = alpha * STEP_DEC;
+                terms.params = terms.saved_params;
+                continue;
+            }
+
+            if (g_reg_runtime_scale > 0.0) {
+                double new_cval = terms.constraint_value();
+                if (new_cval > cval_cap) {
+                    step = alpha * STEP_DEC;
+                    terms.params = terms.saved_params;
+                    continue;
+                }
+            }
+
+            double dgrad_dot_dx = 0.0;
+            for (size_t k = 0; k < terms.grad.size(); ++k) {
+                dgrad_dot_dx += (terms.grad[k] - terms.prev_grad[k]) * terms.grad[k];
+            }
+            if (dgrad_dot_dx > 0.0) {
+                step = std::min(std::max(alpha * (grad2 / dgrad_dot_dx), STEP_MIN), step_max);
+            } else {
+                step = std::min(alpha * STEP_INC, step_max);
+            }
+            accepted = true;
+            break;
+        }
+        if (!accepted) {
+            break;
+        }
+    }
+
+    auto saved = terms.params;
+    terms.params = best_params;
+    auto best_st = terms.sat_stats();
+    out.strict_ok = best_st.strict_ok;
+    out.violated_on_best = best_st.strict_violations;
+    terms.params = saved;
+    return out;
+}
+
+static void print_filter_case_line(
+    const FilterSolveResult& res,
+    size_t case_index,
+    const std::vector<size_t>& gens_case,
+    bool metadata_only
+) {
+    const int POT_WIDTH = 16;   // includes dot and fractional part
+    const int POT_PREC = 6;
+    const int REM_WIDTH = 6;
+
+    std::ios old_state(nullptr);
+    old_state.copyfmt(std::cout);
+
+    std::cout << std::setfill('0')
+              << std::setw(POT_WIDTH) << std::fixed << std::setprecision(POT_PREC) << res.best_potential
+              << " "
+              << std::setw(REM_WIDTH) << std::dec << res.violated_on_best
+              << " "
+              << "#" << (case_index + 1) << ")";
+
+    if (!metadata_only) {
+        for (size_t g : gens_case) {
+            std::cout << " " << g;
+        }
+    }
+    std::cout << "\n";
+
+    std::cout.copyfmt(old_state);
+}
+
 int main(int argc, char** argv) {
     std::string gens_str =
         "1 3 5 7 9 11 13 15 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0 1 3 5 7 9 11 13 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 3 5 7 9 11 13 15 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 3 5 7 9 11 13 12 11 10 9 8 7 6 5 4 3 5 7 9 11 10 9 8 7 6 5 7 9 11 13 12 11 13 15 14 13 12 11 10 9 8 7 9 11 13 15 17 16 15 14 13 12 11 10 9 8 7 6 5 4 5 7 6 7 9 8 7 9 11 13 15 14 13 12 11 13 15 17 16 15 14 13 12 11 10 9 8 9 11 10 12 1 3 5 7 9 11 13 15 17";
@@ -746,6 +1107,10 @@ int main(int argc, char** argv) {
     enum class LogFormat { Compact, Full };
     LogFormat log_format = LogFormat::Compact;
     bool unlimited_steps = true;
+    bool explicit_input = false;
+    bool require_margin = false;
+    bool metadata_only = false;
+    AxisModeConfig axis_mode;
     for (int argi = 1; argi < argc; ++argi) {
         std::string arg = argv[argi];
         if (arg == "--help" || arg == "-h") {
@@ -759,6 +1124,7 @@ int main(int argc, char** argv) {
                 return 2;
             }
             gens_str = argv[++argi];
+            explicit_input = true;
             continue;
         }
         if (arg == "--gens-file") {
@@ -773,6 +1139,7 @@ int main(int argc, char** argv) {
                 return 2;
             }
             gens_str = file_contents;
+            explicit_input = true;
             continue;
         }
         if (arg == "--max-steps") {
@@ -788,6 +1155,53 @@ int main(int argc, char** argv) {
             }
             continue;
         }
+        if (arg == "--axis-pair") {
+            axis_mode.enabled = true;
+            axis_mode.boundary_pair = true;
+            if (argi + 1 < argc) {
+                std::string next = argv[argi + 1];
+                if (!next.empty() && next[0] != '-' && next.find(',') != std::string::npos) {
+                    size_t left = 0, right = 0;
+                    if (!parse_axis_pair_spec(next, left, right)) {
+                        std::cerr << "Invalid --axis-pair format. Expected I,J\n";
+                        return 2;
+                    }
+                    axis_mode.boundary_pair = false;
+                    axis_mode.left = left;
+                    axis_mode.right = right;
+                    ++argi;
+                }
+            }
+            continue;
+        }
+        if (arg == "--axis-eps") {
+            if (argi + 1 >= argc) {
+                std::cerr << "Missing value for --axis-eps\n";
+                return 2;
+            }
+            axis_mode.eps = std::stod(argv[++argi]);
+            continue;
+        }
+        if (arg == "--min-angle") {
+            if (argi + 1 >= argc) {
+                std::cerr << "Missing value for --min-angle\n";
+                return 2;
+            }
+            g_min_angle = std::stod(argv[++argi]);
+            if (g_min_angle < 0.0) {
+                std::cerr << "--min-angle must be >= 0\n";
+                return 2;
+            }
+            continue;
+        }
+        if (arg == "--require-margin") {
+            require_margin = true;
+            continue;
+        }
+        if (arg == "--metadata-only" || arg == "--MetadataOnly") {
+            metadata_only = true;
+            continue;
+        }
         if (!arg.empty() && arg[0] != '-') {
             // Positional numbers: ./prog 1 3 5 ...
             std::ostringstream ss;
@@ -796,6 +1210,7 @@ int main(int argc, char** argv) {
                 ss << ' ' << argv[j];
             }
             gens_str = ss.str();
+            explicit_input = true;
             break;
         }
         std::cerr << "Unknown option: " << arg << "\n";
@@ -803,20 +1218,95 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    if (!explicit_input && !isatty(STDIN_FILENO)) {
+        auto cases = parse_filter_cases_from_stdin(std::cin);
+        if (!cases.empty()) {
+            for (size_t i = 0; i < cases.size(); ++i) {
+                const auto& gens_case = cases[i];
+                if (gens_case.empty()) {
+                    continue;
+                }
+                OMatrix o_case = makeOMatrix(gens_case);
+                try {
+                    Terms terms_case{o_case, axis_mode};
+                    auto res = solve_for_filter(terms_case, max_steps_limit, unlimited_steps, step);
+                    print_filter_case_line(res, i, gens_case, metadata_only);
+                } catch (const std::exception& e) {
+                    std::cerr << "Axis mode error on case #" << (i + 1) << ": " << e.what() << "\n";
+                    return 2;
+                }
+            }
+            return 0;
+        }
+    }
+
     auto gens = gens_str_to_vec(gens_str);
+    if (gens.empty()) {
+        std::cerr << "No generators were provided\n";
+        return 2;
+    }
+
     OMatrix o = makeOMatrix(gens);
+
+    if (axis_mode.enabled && o.n < 2) {
+        std::cerr << "Axis mode error: at least two lines are required\n";
+        return 2;
+    }
+
+    if (axis_mode.enabled && !(axis_mode.eps > 0.0)) {
+        std::cerr << "Axis mode error: axis eps must be > 0\n";
+        return 2;
+    }
+
+    if (axis_mode.enabled) {
+        const double pi = std::acos(-1.0);
+        if (axis_mode.boundary_pair) {
+            const double eps_max = pi / static_cast<double>(o.n - 1);
+            if (axis_mode.eps >= eps_max) {
+                std::cerr << "Axis mode error: boundary --axis-pair requires axis eps < pi/(n-1)\n";
+                return 2;
+            }
+        } else {
+            if (axis_mode.right >= o.n) {
+                std::cerr << "Axis mode error: axis pair is out of range for n=" << o.n << "\n";
+                return 2;
+            }
+            if (axis_mode.right != axis_mode.left + 1) {
+                std::cerr << "Axis mode error: axis pair must be adjacent\n";
+                return 2;
+            }
+            const double delta = pi / (2.0 * static_cast<double>(o.n - 1));
+            if (axis_mode.eps >= 2.0 * delta) {
+                std::cerr << "Axis mode error: axis eps must be smaller than pi/(n-1)\n";
+                return 2;
+            }
+        }
+    }
+
     Terms terms{o};
+    if (axis_mode.enabled) {
+        try {
+            terms = Terms{o, axis_mode};
+        } catch (const std::exception& e) {
+            std::cerr << "Axis mode error: " << e.what() << "\n";
+            return 2;
+        }
+    }
 
     double best_result = std::numeric_limits<double>::infinity();
     size_t sat_hits = 0;
     double best_sat_edge_ratio = std::numeric_limits<double>::infinity();
     size_t iter_done = 0;
+    // Armijo+BB constants
     const double STEP_DEC = 0.5;
     const double STEP_INC = 1.1;
     const double ARMIJO_C = 0.5;
     const double STEP_MIN = 1e-14;
-    const double STEP_MAX = 1.0;
+    const double STEP_MAX_CONSTRAINT = 1e20;  // unconstrained BB in constraint phase
+    const double STEP_MAX_REG = 1.0;          // conservative in reg phase
     g_reg_runtime_scale = 0.0;
+    double cval_at_reg_entry = 0.0;  // constraint_value when reg phase started
+    bool was_in_reg = false;
     std::cout << "#LOG_BEGIN\n";
     terms.precompute_intersections();
     terms.calc_grad();
@@ -832,14 +1322,22 @@ int main(int argc, char** argv) {
         double smooth = std::clamp(g_reg_scale_smooth, 0.0, 1.0);
         g_reg_runtime_scale += (target_reg_scale - g_reg_runtime_scale) * smooth;
 
+        bool in_reg = (g_reg_runtime_scale > 0.0);
+        if (in_reg && !was_in_reg) {
+            cval_at_reg_entry = constraint_val;
+        }
+        was_in_reg = in_reg;
+
         terms.prev_grad = terms.grad;
         iter_done = i;
-        terms.precompute_intersections();
+        if (g_reg_runtime_scale > 0.0) terms.precompute_intersections();
         double val = terms.value();
-        if (val < best_result) best_result = val;
-        double grad2 = terms.calc_grad(); // also updates terms.grad buffer
+        double grad2 = terms.calc_grad();
         double grad = std::sqrt(grad2);
+
         if (LOG_EVERY != 0 && i % LOG_EVERY == 0) {
+            if (g_reg_runtime_scale <= 0.0) terms.precompute_intersections(); // for geo_stats logging
+            if (val < best_result) best_result = val;
             auto st = st_iter;
             auto gs = terms.geo_stats();
             if (log_format == LogFormat::Full) {
@@ -860,9 +1358,6 @@ int main(int argc, char** argv) {
                     << " | regS " << g_reg_runtime_scale
                     << std::endl;
             } else {
-                // Compact: focus on what matters for convergence.
-                // Fixed-width columns for easy diff/scan.
-                // All floats use scientific notation to keep width stable across magnitudes.
                 std::cout << std::setw(8) << i
                           << " V=" << std::setw(13) << std::scientific << std::setprecision(6) << val
                           << " G=" << std::setw(11) << std::scientific << std::setprecision(3) << grad
@@ -877,7 +1372,8 @@ int main(int argc, char** argv) {
                           << std::endl;
             }
 
-            if (st.strict_ok) {
+            bool sat_ok_iter = require_margin ? st.margin_ok : st.strict_ok;
+            if (sat_ok_iter) {
                 sat_hits++;
                 if (gs.global_edge_ratio < best_sat_edge_ratio) {
                     best_sat_edge_ratio = gs.global_edge_ratio;
@@ -891,36 +1387,55 @@ int main(int argc, char** argv) {
                     std::cout << "#SAT_HISTORY_END\n";
                 }
             }
+        } else {
+            if (val < best_result) best_result = val;
         }
 
-        // Armijo backtracking; BB update on accepted step.
-        bool accepted = false;
-        for (int j = 0; j < 100; ++j) {
-            double alpha = std::min(std::max(step, STEP_MIN), STEP_MAX);
-            terms.saved_params = terms.params;
-            terms.step(alpha);
-            double new_val = terms.value();
+        {
+            // Armijo backtracking + BB update
+            double step_max = (g_reg_runtime_scale > 0.0) ? STEP_MAX_REG : STEP_MAX_CONSTRAINT;
+            // In reg phase, never let constraint grow beyond 2x its value at reg entry
+            double cval_cap = (g_reg_runtime_scale > 0.0)
+                ? cval_at_reg_entry * 2.0 + 1e-5
+                : std::numeric_limits<double>::infinity();
+            bool accepted = false;
+            for (int j = 0; j < 100; ++j) {
+                double alpha = std::min(std::max(step, STEP_MIN), step_max);
+                terms.saved_params = terms.params;
+                terms.step(alpha);
+                double new_val = terms.value();
 
-            if (new_val - val > -ARMIJO_C * alpha * grad2) {
-                step = alpha * STEP_DEC;
-                terms.params = terms.saved_params;
-                continue;
-            }
+                if (new_val - val > -ARMIJO_C * alpha * grad2) {
+                    step = alpha * STEP_DEC;
+                    terms.params = terms.saved_params;
+                    continue;
+                }
 
-            double dgrad_dot_dx = 0.0;
-            for (size_t k = 0; k < terms.grad.size(); ++k) {
-                dgrad_dot_dx += (terms.grad[k] - terms.prev_grad[k]) * terms.grad[k];
+                // In reg phase: reject if constraint degraded too much
+                if (g_reg_runtime_scale > 0.0) {
+                    double new_cval = terms.constraint_value();
+                    if (new_cval > cval_cap) {
+                        step = alpha * STEP_DEC;
+                        terms.params = terms.saved_params;
+                        continue;
+                    }
+                }
+
+                double dgrad_dot_dx = 0.0;
+                for (size_t k = 0; k < terms.grad.size(); ++k) {
+                    dgrad_dot_dx += (terms.grad[k] - terms.prev_grad[k]) * terms.grad[k];
+                }
+                if (dgrad_dot_dx > 0.0) {
+                    step = std::min(std::max(alpha * (grad2 / dgrad_dot_dx), STEP_MIN), step_max);
+                } else {
+                    step = std::min(alpha * STEP_INC, step_max);
+                }
+                accepted = true;
+                break;
             }
-            if (dgrad_dot_dx > 0.0) {
-                step = std::min(std::max(alpha * (grad2 / dgrad_dot_dx), STEP_MIN), STEP_MAX);
-            } else {
-                step = std::min(alpha * STEP_INC, STEP_MAX);
+            if (!accepted) {
+                break;
             }
-            accepted = true;
-            break;
-        }
-        if (!accepted) {
-            break; // can't find a decreasing step; report in SUMMARY
         }
     }
     std::cout << "#LOG_END\n";
@@ -933,11 +1448,12 @@ int main(int argc, char** argv) {
         double final_grad = std::sqrt(terms.calc_grad());
         auto st = terms.sat_stats();
         auto gs = terms.geo_stats();
+        bool sat_ok_final = require_margin ? st.margin_ok : st.strict_ok;
         double best_sat_edge_ratio_out = std::isfinite(best_sat_edge_ratio)
                                          ? best_sat_edge_ratio
                                          : -1.0;
         std::cout << "#RESULT_BEGIN\n";
-        if (st.strict_ok) {
+        if (sat_ok_final) {
             std::cout
                 << "SAT_FOUND"
                 << " strict=1"
