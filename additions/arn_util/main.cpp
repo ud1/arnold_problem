@@ -7,7 +7,7 @@
 #include "conf.hpp"
 #include "db.hpp"
 #include "graceful_stop.hpp"
-
+#include "run_config.hpp"
 
 struct Params {
     std::string ifile;
@@ -16,6 +16,7 @@ struct Params {
     bool mirror = false;
     bool uniq = false;
     bool add = false;
+    std::string run;
     std::vector<std::string> print;
 };
 
@@ -68,6 +69,10 @@ int main(int argc, char **argv) {
             .help("print (gens, omatrix, n, k, pos, wire, wire_condensed, eid, lf)")
             .nargs(1, 20)
             .store_into(params.print);
+
+    program.add_argument("--run")
+            .help("run processing of configurations in DB")
+            .store_into(params.run);
 
     try {
         program.parse_args(argc, argv);
@@ -215,6 +220,21 @@ int main(int argc, char **argv) {
 
     if (params.add) {
         add_to_db(configurations);
+    }
+
+    if (!params.run.empty()) {
+        auto run_configs = load_configs();
+        bool found = false;
+        for (auto &run_conf : run_configs) {
+            if (run_conf.name == params.run) {
+                found = true;
+                process(run_conf);
+            }
+        }
+        if (!found) {
+            std::cerr << "Run " << params.run << " not found" << std::endl;
+            return -1;
+        }
     }
 
     return 0;

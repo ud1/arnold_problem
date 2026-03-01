@@ -4,12 +4,22 @@ project(arn_util)
 set(CMAKE_CXX_STANDARD 20)
 
 include(FetchContent)
+
+# --- sqlite ---
 FetchContent_Declare(
         sqlite3
         URL https://www.sqlite.org/2026/sqlite-amalgamation-3510200.zip
         URL_HASH SHA3_256=9a9dd4eef7a97809bfacd84a7db5080a5c0eff7aaf1fc1aca20a6dc9a0c26f96
 )
 FetchContent_MakeAvailable(sqlite3)
+
+# --- tiny-process-library ---
+FetchContent_Declare(
+        tiny_process_library
+        GIT_REPOSITORY https://gitlab.com/eidheim/tiny-process-library.git
+        GIT_TAG 8bbb5a211c5c9df8ee69301da9d22fb977b27dc1
+)
+FetchContent_MakeAvailable(tiny_process_library)
 
 add_executable(arn_util main.cpp
         db.cpp
@@ -19,6 +29,8 @@ add_executable(arn_util main.cpp
         db.hpp
         conf.hpp
         graceful_stop.hpp
-        graceful_stop.cpp)
+        graceful_stop.cpp
+        run_config.hpp
+        run_config.cpp)
 #target_include_directories(arn_util PUBLIC "${sqlite_SOURCE_DIR}")
-target_link_libraries(arn_util PRIVATE sqlite3)
+target_link_libraries(arn_util PRIVATE sqlite3 tiny-process-library::tiny-process-library)
