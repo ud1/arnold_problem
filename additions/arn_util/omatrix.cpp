@@ -238,6 +238,41 @@ std::string OMatrix::get_eid() const {
     return result;
 }
 
+OMatrixPtr OMatrix::remove_lines(std::set<Line> lines) const {
+    std::vector<std::optional<Line>> line_inds;
+    size_t n = intersections.size();
+    Line j = 0;
+    for (Line i = 0; i < n; ++i) {
+        if (!lines.count(i)) {
+            line_inds.emplace_back(j++);
+        }
+        else {
+            line_inds.emplace_back();
+        }
+    }
+
+    std::vector<std::vector<Line>> new_intersections;
+    for (Line i = 0; i < n; ++i) {
+        if (line_inds[i].has_value()) {
+            auto old_row = intersections[i];
+            std::vector<Line> new_row;
+            for (auto l : old_row) {
+                if (line_inds[l].has_value())
+                    new_row.push_back(*line_inds[l]);
+            }
+            new_intersections.push_back(new_row);
+        }
+    }
+
+    std::map<Line, Line> new_parallels;
+    for (auto &p : parallels) {
+        if (line_inds[p.first].has_value() && line_inds[p.second].has_value())
+            new_parallels[*line_inds[p.first]] = *line_inds[p.second];
+    }
+
+    return std::make_shared<const OMatrix>(new_intersections, new_parallels);
+}
+
 const std::string B36_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz";
 
 std::string base36_encode(uint64_t value) {
@@ -413,4 +448,16 @@ void print_wire_condensed(std::vector<Line> gens) {
     }
 
     append_vertical_lines(std::cout, n);
+}
+
+std::vector<Line> numbers_str_to_vec(const std::string &s) {
+    std::vector<Line> numbers;
+    std::stringstream ss(s);
+    Line temp_int;
+
+    while (ss >> temp_int) {
+        numbers.push_back(temp_int);
+    }
+
+    return numbers;
 }

@@ -2,6 +2,7 @@
 #include <optional>
 #include <fstream>
 #include <unordered_set>
+#include <set>
 
 #include "argparse.hpp"
 #include "conf.hpp"
@@ -11,26 +12,17 @@
 
 struct Params {
     std::string ifile;
+    std::string gens;
     size_t line_num = 0;
+    size_t concurrency = 1;
     Line rotate = 0;
     bool mirror = false;
     bool uniq = false;
     bool add = false;
     std::string run;
     std::vector<std::string> print;
+    std::string remove_lines;
 };
-
-std::vector<Line> gens_str_to_vec(const std::string& s) {
-    std::vector<Line> numbers;
-    std::stringstream ss(s);
-    Line temp_int;
-
-    while (ss >> temp_int) {
-        numbers.push_back(temp_int);
-    }
-
-    return numbers;
-}
 
 int main(int argc, char **argv) {
     init_graceful_stop();
@@ -42,6 +34,10 @@ int main(int argc, char **argv) {
             .help("input file")
             .store_into(params.ifile);
 
+    program.add_argument("-g", "--gens")
+            .help("input generators")
+            .store_into(params.gens);
+
     program.add_argument("-l", "--line")
             .help("line number (starts from 1)")
             .store_into(params.line_num);
@@ -49,6 +45,10 @@ int main(int argc, char **argv) {
     program.add_argument("-r", "--rotate")
             .help("rotate configuration")
             .store_into(params.rotate);
+
+    program.add_argument("-rm", "--remove_lines")
+            .help("space-separated list of lines to remove")
+            .store_into(params.remove_lines);
 
     program.add_argument("-m", "--mirror")
             .help("mirror configuration")
@@ -74,6 +74,10 @@ int main(int argc, char **argv) {
             .help("run processing of configurations in DB")
             .store_into(params.run);
 
+    program.add_argument("--concurrency")
+            .help("run concurrency")
+            .store_into(params.concurrency);
+
     try {
         program.parse_args(argc, argv);
     }
@@ -81,6 +85,12 @@ int main(int argc, char **argv) {
         std::cerr << err.what() << std::endl;
         std::cerr << program;
         return 1;
+    }
+
+    std::set<Line> remove_lines;
+    if (!params.remove_lines.empty()) {
+        for (auto l : numbers_str_to_vec(params.remove_lines))
+            remove_lines.insert(l);
     }
 
     std::vector<Configuration> configurations;
@@ -100,7 +110,7 @@ int main(int argc, char **argv) {
             if (params.line_num > 0 && i != params.line_num)
                 continue;
 
-            std::vector<Line> gens = gens_str_to_vec(line);
+            std::vector<Line> gens = numbers_str_to_vec(line);
             if (params.line_num > 0 && gens.empty())
             {
                 std::cerr << "Line is empty" << std::endl;
@@ -111,6 +121,9 @@ int main(int argc, char **argv) {
             if (params.line_num > 0)
                 break;
         }
+    }
+    if (!params.gens.empty()) {
+        configurations.emplace_back(0, numbers_str_to_vec(params.gens));
     }
 
     if (params.uniq) {
@@ -138,6 +151,11 @@ int main(int argc, char **argv) {
         }
 
         bool matrix_updated = false;
+
+        if (!remove_lines.empty()) {
+            conf.o = conf.o->remove_lines(remove_lines);
+            matrix_updated = true;
+        }
 
         if (params.mirror) {
             conf.o = conf.o->mirror();
@@ -228,7 +246,7 @@ int main(int argc, char **argv) {
         for (auto &run_conf : run_configs) {
             if (run_conf.name == params.run) {
                 found = true;
-                process(run_conf);
+                process(run_conf, params.concurrency);
             }
         }
         if (!found) {

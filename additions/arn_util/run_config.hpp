@@ -6,6 +6,7 @@
 
 struct RunConfig {
     std::string name;
+    std::vector<std::string> transform;
     std::vector<std::string> command;
 };
 

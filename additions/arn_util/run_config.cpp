@@ -25,6 +25,8 @@ std::vector<RunConfig> load_configs() {
         for (auto r : runs) {
             RunConfig config;
             config.name = r["name"];
+            if (!r["transform"].is_null())
+                config.command = r["transform"];
             config.command = r["command"];
             if (config.name.empty() || config.command.empty()) {
                 std::cerr << "Invalid run config" << std::endl;

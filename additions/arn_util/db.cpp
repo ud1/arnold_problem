@@ -5,9 +5,11 @@
 #include <iostream>
 #include <chrono>
 #include <format>
+#include <thread>
 #include "db.hpp"
 #include "graceful_stop.hpp"
 #include "process.hpp"
+#include "blocking_queue.hpp"
 
 struct DbDeleter {
     void operator()(sqlite3* ptr) {
@@ -295,80 +297,212 @@ std::vector<std::pair<std::string, std::string>> parse_output(const std::string 
     return result;
 }
 
-void process(const RunConfig &run_command) {
-    Db db = open_main_db();
-    std::vector<std::string> eids = get_conf_eids(db, run_command);
-    std::cout << "Found " << eids.size() << " configurations to process" << std::endl;
+static std::mutex g_proc_mtx;
+static std::unordered_set<TinyProcessLib::Process*> g_running;
 
-    size_t i = 0;
-    for (auto &eid : eids) {
-        if (is_stopped())
-            break;
+struct ProcessGuard {
+    TinyProcessLib::Process *p;
+    explicit ProcessGuard(TinyProcessLib::Process &proc) : p(&proc) {
+        std::lock_guard lk(g_proc_mtx);
+        g_running.insert(p);
+    }
+    ~ProcessGuard() {
+        std::lock_guard lk(g_proc_mtx);
+        g_running.erase(p);
+    }
+};
 
-        auto saved_conf = get_saved_conf(db, eid);
-        if (!saved_conf) {
-            std::cerr << "Configuration " << eid << " not found" << std::endl;
-            continue;
+static void kill_all_processes() {
+    std::lock_guard lk(g_proc_mtx);
+    for (auto *p : g_running) {
+        try {
+            p->kill();
+        } catch (...) {}
+    }
+}
+
+struct ProcRun {
+    int status = -1;
+    double duration_ms = 0.0;
+    std::string out;
+    std::string err;
+};
+
+static ProcRun run_capture(const std::vector<std::string> &cmd) {
+    ProcRun r;
+    TimerElapsed t(r.duration_ms);
+
+    TinyProcessLib::Process proc(
+            cmd, "",
+            [&r](const char *bytes, size_t n){
+                r.out.append(bytes, n);
+            },
+            [&r](const char *bytes, size_t n){
+                r.err.append(bytes, n);
+            }
+    );
+    ProcessGuard guard(proc);
+    r.status = proc.get_exit_status();
+    return r;
+}
+
+struct TaskResult {
+    std::string eid;
+    std::string start_time;
+
+    int status = -1;
+    double duration_ms = 0.0;
+    std::string stdout_data;
+    std::string stderr_data;
+};
+
+static std::vector<std::string> build_cmd(
+        const std::vector<std::string> &tmpl,
+        const std::string &gens_value
+) {
+    std::vector<std::string> cmd;
+    cmd.reserve(tmpl.size());
+    for (const auto &s : tmpl) {
+        if (s == "%gens")
+            cmd.push_back(gens_value);
+        else
+            cmd.push_back(s);
+    }
+    return cmd;
+}
+
+static std::string rtrim_newlines(std::string s) {
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+    return s;
+}
+
+static TaskResult run_one_task(const RunConfig &run_command, const SavedConf &saved_conf) {
+    TaskResult tr;
+    tr.eid = saved_conf.eid;
+    tr.start_time = current_time_str();
+
+    if (is_stopped())
+        return tr;
+
+    std::string gens_for_command = saved_conf.gens;
+
+    if (!run_command.transform.empty() && !is_stopped()) {
+        auto tcmd = build_cmd(run_command.transform, saved_conf.gens);
+        auto t = run_capture(tcmd);
+
+        if (is_stopped()) return tr;
+
+        if (t.status != 0) {
+            tr.status = t.status;
+            tr.duration_ms = t.duration_ms;
+            tr.stderr_data = "Transform error. " + t.err;
+            tr.stdout_data = t.out;
+            return tr;
         }
 
-        std::vector<std::string> cmd;
-        for (auto &cmd_v : run_command.command) {
-            if (cmd_v == "%gens") {
-                cmd.push_back(saved_conf->gens);
-            }
-            else if (cmd_v == "%n") {
-                cmd.push_back(std::to_string(saved_conf->n));
-            }
-            else if (cmd_v == "%k") {
-                cmd.push_back(std::to_string(saved_conf->k));
-            }
-            else if (cmd_v == "%eid") {
-                cmd.push_back(saved_conf->eid);
-            }
-            else {
-                cmd.push_back(cmd_v);
-            }
-        }
-
-        std::string output;
-        std::string err_output;
-        double duration = 0.0;
-        int status;
-        std::string start_time = current_time_str();
-
-        {
-            TimerElapsed t(duration);
-            TinyProcessLib::Process process(cmd, "", [&output](const char *bytes, size_t n) {
-                output += std::string(bytes, n);
-            }, [&err_output](const char *bytes, size_t n) {
-                err_output += std::string(bytes, n);
-            });
-            status = process.get_exit_status();
-        }
-
-        auto output_vals = parse_output(output, err_output);
-
-        Transaction transaction(db.get());
-        auto insert_run = db.createStatement("INSERT INTO runs(name, eid, start_time, duration_ms, status) VALUES(?,?,?,?,?)");
-        sqlite3_bind_text(insert_run.get(), 1, run_command.name.data(), run_command.name.size(), SQLITE_STATIC);
-        sqlite3_bind_text(insert_run.get(), 2, eid.data(), eid.size(), SQLITE_STATIC);
-        sqlite3_bind_text(insert_run.get(), 3, start_time.data(), start_time.size(), SQLITE_STATIC);
-        sqlite3_bind_double(insert_run.get(), 4, duration);
-        sqlite3_bind_int(insert_run.get(), 5, status);
-        insert_run.step();
-
-        sqlite3_int64 run_id = sqlite3_last_insert_rowid(db.get());
-
-        ++i;
-        std::cout << "Processed " << i << "/" << eids.size() << std::endl;
-
-        auto insert_results = db.createStatement("INSERT INTO results(run_id, k, v) VALUES(?,?,?)");
-        for (auto &p : output_vals) {
-            sqlite3_bind_int64(insert_results.get(), 1, run_id);
-            sqlite3_bind_text(insert_results.get(), 2, p.first.data(), p.first.size(), SQLITE_STATIC);
-            sqlite3_bind_text(insert_results.get(), 3, p.second.data(), p.second.size(), SQLITE_STATIC);
-            insert_results.step();
-            sqlite3_reset(insert_results.get());
+        gens_for_command = rtrim_newlines(t.out);
+        if (gens_for_command.empty()) {
+            tr.status = 2;
+            tr.duration_ms = t.duration_ms;
+            tr.stderr_data = "Transform produced empty gens";
+            return tr;
         }
     }
+
+    auto cmd = build_cmd(run_command.command, gens_for_command);
+    auto r = run_capture(cmd);
+
+    tr.status = r.status;
+    tr.duration_ms = r.duration_ms;
+    tr.stdout_data = std::move(r.out);
+    tr.stderr_data = std::move(r.err);
+    return tr;
+}
+
+
+void process(const RunConfig &run_command, size_t concurrency) {
+    Db db = open_main_db();
+    std::vector<std::string> eids = get_conf_eids(db, run_command);
+    std::cout << "Found " << eids.size() << " configurations to process, concurrency: " << concurrency << std::endl;
+
+    if (concurrency == 0)
+        concurrency = 1;
+    concurrency = std::min(concurrency, eids.size());
+
+    BlockingQueue<std::pair<size_t, TaskResult>> completed;
+    std::jthread killer([&]{
+        while (!is_stopped())
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        completed.notify_one();
+    });
+
+    auto start_slot = [&](size_t slot, size_t eid_index) {
+        return std::jthread([&, slot, eid_index]{
+            auto eid = eids[eid_index];
+            auto saved_conf = get_saved_conf(db, eid);
+            if (!saved_conf) {
+                std::cerr << "Configuration " << eid << " not found" << std::endl;
+                completed.push({slot, TaskResult()});
+                return;
+            }
+            TaskResult r = run_one_task(run_command, *saved_conf);
+            completed.push({slot, std::move(r)});
+        });
+    };
+
+    std::vector<std::jthread> slots;
+    slots.resize(concurrency);
+
+    size_t next_to_start = 0;
+    for (size_t s = 0; s < concurrency; ++s) {
+        slots[s] = start_slot(s, next_to_start++);
+    }
+
+    size_t finished = 0;
+
+    while (finished < eids.size()) {
+        if (is_stopped()) {
+            break;
+        }
+
+        auto msg = completed.pop_wait();
+        if (!msg)
+            break;
+
+        const size_t slot = msg->first;
+        TaskResult &r = msg->second;
+
+        {
+            auto output_vals = parse_output(r.stdout_data, r.stderr_data);
+
+            Transaction transaction(db.get());
+            auto insert_run = db.createStatement("INSERT INTO runs(name, eid, start_time, duration_ms, status) VALUES(?,?,?,?,?)");
+            sqlite3_bind_text(insert_run.get(), 1, run_command.name.data(), run_command.name.size(), SQLITE_STATIC);
+            sqlite3_bind_text(insert_run.get(), 2, r.eid.data(), r.eid.size(), SQLITE_STATIC);
+            sqlite3_bind_text(insert_run.get(), 3, r.start_time.data(), r.start_time.size(), SQLITE_STATIC);
+            sqlite3_bind_double(insert_run.get(), 4, r.duration_ms);
+            sqlite3_bind_int(insert_run.get(), 5, r.status);
+            insert_run.step();
+
+            sqlite3_int64 run_id = sqlite3_last_insert_rowid(db.get());
+
+            auto insert_results = db.createStatement("INSERT INTO results(run_id, k, v) VALUES(?,?,?)");
+            for (auto &p : output_vals) {
+                sqlite3_bind_int64(insert_results.get(), 1, run_id);
+                sqlite3_bind_text(insert_results.get(), 2, p.first.data(), p.first.size(), SQLITE_STATIC);
+                sqlite3_bind_text(insert_results.get(), 3, p.second.data(), p.second.size(), SQLITE_STATIC);
+                insert_results.step();
+                sqlite3_reset(insert_results.get());
+            }
+        }
+
+        ++finished;
+        std::cout << "Processed " << finished << "/" << eids.size() << std::endl;
+
+        if (!is_stopped() && next_to_start < eids.size()) {
+            slots[slot] = start_slot(slot, next_to_start++);
+        }
+    }
+
+    kill_all_processes();
 }

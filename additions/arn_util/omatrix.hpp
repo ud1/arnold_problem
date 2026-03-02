@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <system_error>
 #include <memory>
+#include <set>
 #include "bits.hpp"
 
 struct OMatrix;
@@ -37,6 +38,7 @@ struct OMatrix : std::enable_shared_from_this<OMatrix> {
     OMatrixPtr mirror() const;
     uint64_t hash() const;
     OMatrixPtr min_o() const;
+    OMatrixPtr remove_lines(std::set<Line> lines) const;
     bool operator==(const OMatrix& other) const {
         return intersections == other.intersections;
     }
@@ -51,7 +53,7 @@ private:
     std::map<Line, Line> parallels;
     mutable std::optional<uint64_t> cached_hash;
     mutable OMatrixPtr cached_min_o;
-    mutable bool is_min_o;
+    mutable bool is_min_o = false;
 };
 
 namespace std {
@@ -90,5 +92,7 @@ void append_vertical_lines(std::ostream& os, Line count);
 void print_wire(std::vector<Line> gens);
 
 void print_wire_condensed(std::vector<Line> gens);
+
+std::vector<Line> numbers_str_to_vec(const std::string& s);
 
 #endif //ARN_UTIL_OMATRIX_HPP
