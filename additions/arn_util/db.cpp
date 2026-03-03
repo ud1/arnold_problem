@@ -430,8 +430,8 @@ void process(const RunConfig &run_command, size_t concurrency) {
     concurrency = std::min(concurrency, eids.size());
 
     BlockingQueue<std::pair<size_t, TaskResult>> completed;
-    std::jthread killer([&]{
-        while (!is_stopped())
+    std::jthread killer([&](std::stop_token st) {
+        while (!is_stopped() && !st.stop_requested())
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         completed.notify_one();
     });
