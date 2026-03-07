@@ -296,6 +296,137 @@ public class Generators
         return polygonStats;
     }
 
+    public CounterMap getPolygonCount() {
+        if (getLinesNumber() % 2 == 1)
+            return getPolygonCountOdd();
+
+        return getPolygonCountEven();
+    }
+
+    private CounterMap getPolygonCountOdd() {
+        CounterMap result = new CounterMap();
+        int numLines = getLinesNumber();
+        int[] lines = new int[numLines];
+
+        for (int i = 0; i < numLines; ++i)
+        {
+            lines[i] = i;
+        }
+
+        int[] d = new int[numLines + 1];
+        {
+            d[0] = 1;
+            d[numLines] = 1;
+            for (int i = 1; i < numLines; ++i) {
+                d[i] = 2;
+            }
+        }
+
+        for (int g : generators)
+        {
+            if (g < 0)
+                throw new RuntimeException("Invalid configuration " + this);
+
+            if (lines[g] > lines[g + 1])
+                throw new RuntimeException("Invalid configuration " + this);
+
+            d[g]++;
+            d[g + 1]++;
+            d[g + 2]++;
+            result.inc(d[g + 1]);
+            d[g + 1] = 1;
+
+            int temp = lines[g];
+            lines[g] = lines[g + 1];
+            lines[g + 1] = temp;
+        }
+
+        {
+            result.inc(d[0] + 1);
+            result.inc(d[numLines] + 1);
+            for (int i = 1; i < numLines; ++i) {
+                result.inc(d[i] + 2);
+            }
+        }
+        return result;
+    }
+
+    private CounterMap getPolygonCountEven() {
+        CounterMap result = new CounterMap();
+        int numLines = getLinesNumber();
+        int[] lines = new int[numLines];
+
+        for (int i = 0; i < numLines; ++i)
+        {
+            lines[i] = i;
+        }
+
+        int[] d = new int[numLines + 1];
+        int[] dExt = new int[numLines + 1];
+        boolean[] isExt = new boolean[numLines + 1];
+
+        for (int i = 0; i < numLines + 1; ++i) {
+            isExt[i] = true;
+        }
+
+        for (int g : generators)
+        {
+            if (g < 0)
+                throw new RuntimeException("Invalid configuration " + this);
+
+            if (lines[g] > lines[g + 1])
+                throw new RuntimeException("Invalid configuration " + this);
+
+            d[g]++;
+            d[g + 1]++;
+            d[g + 2]++;
+            if (isExt[g + 1]) {
+                dExt[g + 1] = d[g + 1];
+                isExt[g + 1] = false;
+            }
+            else {
+                result.inc(d[g + 1]);
+            }
+            d[g + 1] = 1;
+
+            int temp = lines[g];
+            lines[g] = lines[g + 1];
+            lines[g + 1] = temp;
+        }
+
+        for (int g = 0; g < numLines - 1; ++g) {
+            if (lines[g] < lines[g + 1]) {
+                d[g]++;
+                d[g + 1]++;
+                d[g + 2]++;
+                if (isExt[g + 1]) {
+                    dExt[g + 1] = d[g + 1];
+                    isExt[g + 1] = false;
+                }
+                else {
+                    result.inc(d[g + 1]);
+                }
+                d[g + 1] = 1;
+                int temp = lines[g];
+                lines[g] = lines[g + 1];
+                lines[g + 1] = temp;
+            }
+        }
+
+        result.inc(d[0] + d[numLines]);
+
+        for (int i = 1; i < numLines; ++i)
+        {
+            if (lines[i - 1] < lines[i]) {
+                throw new RuntimeException("Invalid configuration " + this);
+            }
+            else {
+                result.inc(d[i] + dExt[numLines - i]);
+            }
+        }
+        return result;
+    }
+
     public OMatrix getOMatrix() {
         if (oMatrix == null)
             oMatrix = new OMatrix(this);
