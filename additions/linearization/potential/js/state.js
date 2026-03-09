@@ -13,6 +13,7 @@
     flags: {
       checkerMode: true,
       coloredMode: false,
+      highlightDefects: false,
       showOuter: true,
       showPoints: false,
     },

@@ -52,6 +52,8 @@
     if (!clipPoly) return;
     chooseColorOrientation();
     const coloredMode = !!App.state.flags.coloredMode;
+    const highlightDefects = !!App.state.flags.highlightDefects;
+    const defectFill = "#ff0000";
     const debugRows = [];
     let cellIndex = 0;
     for (const c of App.state.cells) {
@@ -61,7 +63,8 @@
       const clipped = App.clipPolygonByConvex(c.poly, clipPoly);
       if (clipped.length < 3) continue;
       const sideCount = Number.isFinite(c.sideCount) ? c.sideCount : (c.poly.length + (c.external ? 1 : 0));
-      const fill = black ? "#000000" : sideColorByCount(sideCount);
+      const isDefect = black && highlightDefects && sideCount !== 3;
+      const fill = isDefect ? defectFill : (black ? "#000000" : sideColorByCount(sideCount));
       if (!black && coloredMode) {
         debugRows.push({
           idx: cellIndex,
@@ -73,12 +76,19 @@
         });
       }
       const points = clipped.map(p => `${p.x},${p.y}`).join(" ");
-      App.el.polyLayer.appendChild(createSVG("polygon", {
+      const attrs = {
         points,
         fill,
         "fill-opacity": 1.0,
         stroke: "none",
-      }));
+      };
+      if (isDefect) {
+        attrs.stroke = "#000000";
+        attrs["stroke-width"] = 0.8;
+        attrs["stroke-opacity"] = 0.6;
+        attrs["vector-effect"] = "non-scaling-stroke";
+      }
+      App.el.polyLayer.appendChild(createSVG("polygon", attrs));
       cellIndex++;
     }
     logColoredCellsDebug(debugRows);
