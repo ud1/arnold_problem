@@ -33,7 +33,7 @@ public class OMatrix
         {
             for (Integer v : r)
             {
-                hash = hash * 106039 + v;
+                hash = hash * 106039 + v + 1;
             }
         }
 
