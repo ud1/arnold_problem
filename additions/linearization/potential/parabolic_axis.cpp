@@ -417,17 +417,12 @@ struct LinearSystem {
 static LinearSystem build_linear_system(
     const OMatrix& o,
     const std::vector<long double>& m,
-    size_t axis_left,
-    size_t axis_right,
     long double strict_margin
 ) {
     const auto specs = build_edge_specs(o);
     std::vector<int> var_index(o.n, -1);
-    size_t d = 0;
-    for (size_t i = 0; i < o.n; ++i) {
-        if (i == axis_left || i == axis_right) continue;
-        var_index[i] = (int)d++;
-    }
+    size_t d = o.n;
+    for (size_t i = 0; i < o.n; ++i) var_index[i] = (int)i;
 
     std::vector<std::vector<long double>> A;
     std::vector<long double> rhs;
@@ -439,15 +434,10 @@ static LinearSystem build_linear_system(
         long double c2 = m[s.m3] - m[s.m4];
 
         std::vector<long double> row(d, 0.0L);
-        long double constant = 0.0L;
 
         auto add_coeff = [&](size_t line, long double coeff) {
             int vi = var_index[line];
-            if (vi >= 0) {
-                row[(size_t)vi] += coeff;
-            } else {
-                constant += coeff * 0.0L; // anchored b = 0
-            }
+            if (vi >= 0) row[(size_t)vi] += coeff;
         };
 
         add_coeff(s.b1, +c1);
@@ -457,7 +447,7 @@ static LinearSystem build_linear_system(
 
         long double row_scale = 0.0L;
         for (long double v : row) row_scale = std::max(row_scale, fabsl(v));
-        long double r = -strict_margin - constant;
+        long double r = -strict_margin;
 
         if (row_scale == 0.0L) {
             if (!(0.0L <= r)) {
@@ -608,12 +598,11 @@ static AttemptResult solve_for_omatrix(
     }
 
     BuildResult br = build_fixed_slopes(o.n, axis);
-    LinearSystem sys = build_linear_system(o, br.m, br.axis_left, br.axis_right, strict_margin);
+    LinearSystem sys = build_linear_system(o, br.m, strict_margin);
     SolveResult sr = solve_feasibility_lp(sys, solve_params.tol, solve_params.backend);
 
     std::vector<long double> b(o.n, 0.0L);
     for (size_t line = 0; line < o.n; ++line) {
-        if (line == br.axis_left || line == br.axis_right) continue;
         int vi = sys.var_index[line];
         if (vi >= 0 && (size_t)vi < sr.x.size()) b[line] = sr.x[(size_t)vi];
     }
