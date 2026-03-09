@@ -16,6 +16,7 @@ public class LoadConfAndPrint {
 
         System.out.println("D2: " + g.getOMatrix().checkD2Symmetry());
         System.out.println("CM: " + g.getOMatrix().findCmSymmetry());
+        System.out.println("PC: " + g.getPolygonCount());
 
         for (int i = 0; i < 21; i+=2) {
             Generators newGens = g.getOMatrix().rotate(i).get().getGenerators();
