@@ -759,6 +759,15 @@ static bool better_attempt(const AttemptResult& a, const AttemptResult& b) {
 
 static std::string bool_to_json(bool v) { return v ? "true" : "false"; }
 
+static void print_lines_csv_block(const std::vector<long double>& m, const std::vector<long double>& b) {
+    std::cout << "#LINES_BEGIN\n";
+    std::cout << "m,b\n";
+    for (size_t i = 0; i < m.size(); ++i) {
+        std::cout << m[i] << "," << b[i] << "\n";
+    }
+    std::cout << "#LINES_END\n";
+}
+
 static void print_result(const AttemptResult& r, const std::string& format, bool include_lines, size_t case_idx = 0) {
     const char* status = r.feasible ? "SAT" : "NO_SOLUTION";
 
@@ -831,12 +840,7 @@ static void print_result(const AttemptResult& r, const std::string& format, bool
     std::cout << "\n";
 
     if (include_lines && r.m_orig.size() == r.n && r.b_orig.size() == r.n) {
-        std::cout << "LINES [";
-        for (size_t i = 0; i < r.n; ++i) {
-            if (i) std::cout << ", ";
-            std::cout << "(" << r.m_orig[i] << "," << r.b_orig[i] << ")";
-        }
-        std::cout << "]\n";
+        print_lines_csv_block(r.m_orig, r.b_orig);
     }
 }
 
@@ -986,7 +990,7 @@ int main(int argc, char** argv) {
                 try {
                     auto result = solve_case(gens, opt);
                     bool include_lines = (!opt.metadata_only && opt.output_format == "full");
-                    print_result(result, opt.output_format == "full" ? "compact" : opt.output_format, include_lines, idx);
+                    print_result(result, opt.output_format, include_lines, idx);
                 } catch (const std::exception& e) {
                     AttemptResult err;
                     err.feasible = false;
@@ -997,7 +1001,7 @@ int main(int argc, char** argv) {
                     }
                     err.margin = opt.margin;
                     err.eps = opt.eps;
-                    print_result(err, opt.output_format == "full" ? "compact" : opt.output_format, false, idx);
+                    print_result(err, opt.output_format, false, idx);
                 }
             }
             return 0;

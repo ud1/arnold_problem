@@ -925,6 +925,15 @@ static void print_generators_line(const std::vector<size_t>& gens, const std::st
     std::cout << "]\n";
 }
 
+static void print_lines_csv_block(const std::vector<long double>& m, const std::vector<long double>& b) {
+    std::cout << "#LINES_BEGIN\n";
+    std::cout << "m,b\n";
+    for (size_t i = 0; i < m.size(); ++i) {
+        std::cout << (double)m[i] << "," << (double)b[i] << "\n";
+    }
+    std::cout << "#LINES_END\n";
+}
+
 static void print_usage(const char* argv0) {
     std::cerr
         << "Usage:\n"
@@ -1130,12 +1139,7 @@ int main(int argc, char** argv) {
                   << " worst_raw=" << (double)res.worst_raw
                   << "\n";
 
-        std::cout << "LINES [";
-        for (size_t i = 0; i < res.n; ++i) {
-            if (i) std::cout << ", ";
-            std::cout << "(" << (double)res.m[i] << "," << (double)res.b[i] << ")";
-        }
-        std::cout << "]\n";
+        print_lines_csv_block(res.m, res.b);
         if (print_gens) {
             print_generators_line(res.omatrix_gens);
         }

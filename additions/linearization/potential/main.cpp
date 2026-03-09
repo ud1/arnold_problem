@@ -1497,7 +1497,7 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "#LINES_BEGIN\n";
-    terms.print_tuples(std::cout);
+    terms.print_csv(std::cout);
     std::cout << "#LINES_END\n";
 
     return 0;
