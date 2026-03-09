@@ -15,7 +15,9 @@
 #include <unistd.h>
 #include <vector>
 
-#include "interfaces/highs_c_api.h"
+#include "common/solver_backend.h"
+#include "solver/custom_phase1_solver.h"
+#include "solver/highs_phase1_solver.h"
 
 struct OMatrix {
     std::vector<std::vector<size_t>> intersections;
@@ -483,107 +485,49 @@ struct SolveResult {
     long double t = std::numeric_limits<long double>::infinity();
     size_t newton_steps = 0;
     std::vector<long double> x;
+    BackendKind backend_used = BackendKind::Highs;
 };
 
-static SolveResult solve_feasibility_lp(const LinearSystem& sys) {
+static SolveResult solve_feasibility_lp_highs(const LinearSystem& sys, long double tol) {
     SolveResult out;
-
-    const size_t m = sys.A.size();
-    const size_t d = sys.var_index.empty() ? 0 : *std::max_element(sys.var_index.begin(), sys.var_index.end()) + 1;
-
-    if (m == 0) {
-        out.feasible = true;
-        out.max_violation = 0.0L;
-        out.t = 0.0L;
-        out.x.assign(d, 0.0L);
-        return out;
-    }
-
-    const double inf = 1.0e30;
-    const size_t t_col = d;
-    const size_t num_vars = d + 1; // decision vars x plus phase-I slack t
-    const HighsInt num_col = (HighsInt)num_vars;
-    const HighsInt num_row = (HighsInt)m;
-
-    std::vector<double> col_cost(num_vars, 0.0);
-    std::vector<double> col_lower(num_vars, -inf);
-    std::vector<double> col_upper(num_vars, +inf);
-    col_cost[t_col] = 1.0;
-    col_lower[t_col] = 0.0;
-    std::vector<double> row_lower(m, -inf);
-    std::vector<double> row_upper(m, 0.0);
-
-    std::vector<HighsInt> a_start(m + 1, 0);
-    std::vector<HighsInt> a_index;
-    std::vector<double> a_value;
-    a_index.reserve(m * ((d > 0 ? d : 1) + 1));
-    a_value.reserve(m * ((d > 0 ? d : 1) + 1));
-
-    for (size_t i = 0; i < m; ++i) {
-        a_start[i] = (HighsInt)a_index.size();
-        row_upper[i] = (double)sys.rhs[i];
-        for (size_t j = 0; j < d; ++j) {
-            long double v = sys.A[i][j];
-            if (v == 0.0L) continue;
-            a_index.push_back((HighsInt)j);
-            a_value.push_back((double)v);
-        }
-        // A x - t <= rhs
-        a_index.push_back((HighsInt)t_col);
-        a_value.push_back(-1.0);
-    }
-    a_start[m] = (HighsInt)a_index.size();
-
-    std::vector<double> col_value(num_vars, 0.0), col_dual(num_vars, 0.0);
-    std::vector<double> row_value(m, 0.0), row_dual(m, 0.0);
-    std::vector<HighsInt> col_basis_status(num_vars, 0), row_basis_status(m, 0);
-
-    HighsInt model_status = kHighsModelStatusNotset;
-    HighsInt run_status = Highs_lpCall(
-        num_col,
-        num_row,
-        (HighsInt)a_index.size(),
-        kHighsMatrixFormatRowwise,
-        kHighsObjSenseMinimize,
-        0.0,
-        col_cost.data(),
-        col_lower.data(),
-        col_upper.data(),
-        m ? row_lower.data() : nullptr,
-        m ? row_upper.data() : nullptr,
-        m ? a_start.data() : nullptr,
-        a_index.empty() ? nullptr : a_index.data(),
-        a_value.empty() ? nullptr : a_value.data(),
-        col_value.data(),
-        col_dual.data(),
-        m ? row_value.data() : nullptr,
-        m ? row_dual.data() : nullptr,
-        col_basis_status.data(),
-        m ? row_basis_status.data() : nullptr,
-        &model_status
-    );
-
-    std::vector<long double> x(d, 0.0L);
-    for (size_t j = 0; j < d; ++j) x[j] = (long double)col_value[j];
-    const long double t_value = (long double)col_value[t_col];
-
-    long double max_violation = -std::numeric_limits<long double>::infinity();
-    for (size_t i = 0; i < m; ++i) {
-        long double ax = 0.0L;
-        for (size_t j = 0; j < d; ++j) ax += sys.A[i][j] * x[j];
-        max_violation = std::max(max_violation, ax - sys.rhs[i]);
-    }
-
-    out.x = std::move(x);
-    out.max_violation = max_violation;
-    out.t = t_value;
+    out.backend_used = BackendKind::Highs;
+    highs_phase1::Result highs = highs_phase1::solve(sys.A, sys.rhs, tol);
+    out.x = std::move(highs.x);
+    out.max_violation = highs.max_violation;
+    out.t = highs.t;
     out.newton_steps = 0;
-    out.feasible = (run_status == kHighsStatusOk &&
-                    model_status == kHighsModelStatusOptimal &&
-                    out.t <= 1e-10L &&
-                    out.max_violation <= 1e-10L);
+    out.feasible = highs.feasible;
     return out;
 }
+
+static SolveResult solve_feasibility_lp_custom(const LinearSystem& sys, long double tol) {
+    SolveResult out;
+    out.backend_used = BackendKind::Custom;
+    custom_phase1::Result custom = custom_phase1::solve(sys.A, sys.rhs, tol);
+    out.feasible = custom.feasible;
+    out.max_violation = custom.max_violation;
+    out.t = custom.t;
+    out.newton_steps = custom.iterations;
+    out.x = std::move(custom.x);
+    return out;
+}
+
+static SolveResult solve_feasibility_lp(const LinearSystem& sys, long double tol, BackendKind backend) {
+    if (backend == BackendKind::Highs) {
+        return solve_feasibility_lp_highs(sys, tol);
+    }
+    if (backend == BackendKind::Custom) {
+        return solve_feasibility_lp_custom(sys, tol);
+    }
+    SolveResult highs = solve_feasibility_lp_highs(sys, tol);
+    if (highs.feasible) return highs;
+    return solve_feasibility_lp_custom(sys, tol);
+}
+
+struct SolveParams {
+    long double tol = 1e-10L;
+    BackendKind backend = BackendKind::Auto;
+};
 
 struct AttemptResult {
     bool sat = false;
@@ -601,6 +545,7 @@ struct AttemptResult {
     std::vector<long double> m;
     std::vector<long double> b;
     std::vector<size_t> omatrix_gens;
+    BackendKind solver_backend = BackendKind::Highs;
 };
 
 static std::vector<size_t> omatrix_to_generators(const OMatrix& o) {
@@ -655,7 +600,8 @@ static AttemptResult solve_for_omatrix(
     size_t gens_count,
     const AxisModeConfig& axis,
     long double strict_margin,
-    int rotation
+    int rotation,
+    const SolveParams& solve_params
 ) {
     if (!validate_omatrix(o, false)) {
         throw std::runtime_error("Invalid O-matrix before solve");
@@ -663,7 +609,7 @@ static AttemptResult solve_for_omatrix(
 
     BuildResult br = build_fixed_slopes(o.n, axis);
     LinearSystem sys = build_linear_system(o, br.m, br.axis_left, br.axis_right, strict_margin);
-    SolveResult sr = solve_feasibility_lp(sys);
+    SolveResult sr = solve_feasibility_lp(sys, solve_params.tol, solve_params.backend);
 
     std::vector<long double> b(o.n, 0.0L);
     for (size_t line = 0; line < o.n; ++line) {
@@ -697,6 +643,7 @@ static AttemptResult solve_for_omatrix(
     out.m = std::move(br.m);
     out.b = std::move(b);
     out.omatrix_gens = omatrix_to_generators(o);
+    out.solver_backend = sr.backend_used;
     return out;
 }
 
@@ -706,7 +653,8 @@ static AttemptResult solve_case_with_rotations(
     const AxisModeConfig& axis,
     long double strict_margin,
     bool all_rotations,
-    int& tried_rotations
+    int& tried_rotations,
+    const SolveParams& solve_params
 ) {
     AttemptResult best;
     bool have_best = false;
@@ -719,7 +667,7 @@ static AttemptResult solve_case_with_rotations(
         if (!validate_omatrix(current, false)) continue;
         ++tried_rotations;
 
-        AttemptResult cur = solve_for_omatrix(current, gens_count, axis, strict_margin, rot);
+        AttemptResult cur = solve_for_omatrix(current, gens_count, axis, strict_margin, rot, solve_params);
 
         if (!have_best) {
             best = std::move(cur);
@@ -751,7 +699,8 @@ static AttemptResult solve_case_with_sphere_and_rotations(
     bool all_rotations,
     bool sphere_rotations,
     int& tried_sphere_rotations,
-    int& tried_plane_rotations
+    int& tried_plane_rotations,
+    const SolveParams& solve_params
 ) {
     tried_sphere_rotations = 0;
     tried_plane_rotations = 0;
@@ -775,7 +724,7 @@ static AttemptResult solve_case_with_sphere_and_rotations(
 
         int local_tried_rotations = 0;
         AttemptResult cur = solve_case_with_rotations(
-            current_base, gens_count, axis, strict_margin, all_rotations, local_tried_rotations
+            current_base, gens_count, axis, strict_margin, all_rotations, local_tried_rotations, solve_params
         );
         cur.sphere_rotation = sphere_tag;
         tried_plane_rotations += local_tried_rotations;
@@ -946,7 +895,8 @@ static void print_usage(const char* argv0) {
         << "  --axis-pair I,J: anchor adjacent lines I and J\n"
         << "  --all-rotations: iterate all valid O-matrix plane rotations\n"
         << "  --sphere-rotations: iterate sphere rotations; implies --all-rotations\n"
-        << "  --print-gens: print generators for the O-matrix used to produce LINES\n";
+        << "  --print-gens: print generators for the O-matrix used to produce LINES\n"
+        << "  --solver highs|custom|auto: LP backend (default auto)\n";
 }
 
 int main(int argc, char** argv) {
@@ -960,6 +910,7 @@ int main(int argc, char** argv) {
         bool all_rotations = false;
         bool sphere_rotations = false;
         bool print_gens = false;
+        SolveParams solve_params;
 
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
@@ -1015,6 +966,11 @@ int main(int argc, char** argv) {
                 print_gens = true;
                 continue;
             }
+            if (arg == "--solver") {
+                if (i + 1 >= argc) throw std::runtime_error("Missing value for --solver");
+                solve_params.backend = parse_backend_kind(argv[++i]);
+                continue;
+            }
             if (!arg.empty() && arg[0] != '-') {
                 std::ostringstream ss;
                 ss << arg;
@@ -1066,7 +1022,7 @@ int main(int argc, char** argv) {
                         int tried_plane_rotations = 0;
                         AttemptResult res = solve_case_with_sphere_and_rotations(
                             o, gens.size(), axis, strict_margin, all_rotations, sphere_rotations,
-                            tried_sphere_rotations, tried_plane_rotations
+                            tried_sphere_rotations, tried_plane_rotations, solve_params
                         );
 
                         std::cout << (res.sat ? "SAT" : "NO_SOLUTION")
@@ -1080,6 +1036,7 @@ int main(int argc, char** argv) {
                                   << " margin_target=" << (double)strict_margin
                                   << " worst_raw=" << std::setprecision(18) << (double)res.worst_raw
                                   << " t=" << (double)res.t
+                                  << " solver=" << backend_kind_name(res.solver_backend)
                                   << "\n";
                         if (print_gens) {
                             print_generators_line(res.omatrix_gens, "GENS #" + std::to_string(ci + 1));
@@ -1113,7 +1070,7 @@ int main(int argc, char** argv) {
         int tried_plane_rotations = 0;
         AttemptResult res = solve_case_with_sphere_and_rotations(
             o, gens.size(), axis, strict_margin, all_rotations, sphere_rotations,
-            tried_sphere_rotations, tried_plane_rotations
+            tried_sphere_rotations, tried_plane_rotations, solve_params
         );
 
         std::cout << std::setprecision(18);
@@ -1137,6 +1094,7 @@ int main(int argc, char** argv) {
                   << " t=" << (double)res.t
                   << " max_violation_lp=" << (double)res.max_violation_lp
                   << " worst_raw=" << (double)res.worst_raw
+                  << " solver=" << backend_kind_name(res.solver_backend)
                   << "\n";
 
         print_lines_csv_block(res.m, res.b);

@@ -13,7 +13,9 @@
 #include <utility>
 #include <vector>
 
-#include "interfaces/highs_c_api.h"
+#include "common/solver_backend.h"
+#include "solver/custom_phase1_solver.h"
+#include "solver/highs_phase1_solver.h"
 
 struct OMatrix {
     std::vector<std::vector<size_t>> intersections;
@@ -303,99 +305,41 @@ struct SolveResult {
     long double max_violation = std::numeric_limits<long double>::infinity();
     long double t = std::numeric_limits<long double>::infinity();
     std::vector<long double> x;
+    BackendKind backend_used = BackendKind::Highs;
 };
 
-static SolveResult solve_feasibility_lp(const LinearSystem& sys, long double tol) {
+static SolveResult solve_feasibility_lp_highs(const LinearSystem& sys, long double tol) {
     SolveResult out;
-    const size_t m = sys.A.size();
-    const size_t d = sys.var_index.empty() ? 0 : (size_t)(*std::max_element(sys.var_index.begin(), sys.var_index.end()) + 1);
-
-    if (m == 0) {
-        out.feasible = true;
-        out.max_violation = 0.0L;
-        out.t = 0.0L;
-        out.x.assign(d, 0.0L);
-        return out;
-    }
-
-    const double inf = 1.0e30;
-    const size_t t_col = d;
-    const size_t num_vars = d + 1;
-
-    std::vector<double> col_cost(num_vars, 0.0);
-    std::vector<double> col_lower(num_vars, -inf);
-    std::vector<double> col_upper(num_vars, +inf);
-    col_cost[t_col] = 1.0;
-    col_lower[t_col] = 0.0;
-
-    std::vector<double> row_lower(m, -inf);
-    std::vector<double> row_upper(m, 0.0);
-    std::vector<HighsInt> a_start(m, 0);
-    std::vector<HighsInt> a_index;
-    std::vector<double> a_value;
-
-    a_index.reserve(m * ((d > 0 ? d : 1) + 1));
-    a_value.reserve(m * ((d > 0 ? d : 1) + 1));
-
-    for (size_t i = 0; i < m; ++i) {
-        a_start[i] = (HighsInt)a_index.size();
-        row_upper[i] = (double)sys.rhs[i];
-        for (size_t j = 0; j < d; ++j) {
-            long double v = sys.A[i][j];
-            if (v == 0.0L) continue;
-            a_index.push_back((HighsInt)j);
-            a_value.push_back((double)v);
-        }
-        a_index.push_back((HighsInt)t_col);
-        a_value.push_back(-1.0);
-    }
-
-    std::vector<double> col_value(num_vars, 0.0), col_dual(num_vars, 0.0);
-    std::vector<double> row_value(m, 0.0), row_dual(m, 0.0);
-    std::vector<HighsInt> col_basis_status(num_vars, 0), row_basis_status(m, 0);
-
-    HighsInt model_status = kHighsModelStatusNotset;
-    HighsInt run_status = Highs_lpCall(
-        (HighsInt)num_vars,
-        (HighsInt)m,
-        (HighsInt)a_index.size(),
-        kHighsMatrixFormatRowwise,
-        kHighsObjSenseMinimize,
-        0.0,
-        col_cost.data(),
-        col_lower.data(),
-        col_upper.data(),
-        m ? row_lower.data() : nullptr,
-        m ? row_upper.data() : nullptr,
-        m ? a_start.data() : nullptr,
-        a_index.empty() ? nullptr : a_index.data(),
-        a_value.empty() ? nullptr : a_value.data(),
-        col_value.data(),
-        col_dual.data(),
-        m ? row_value.data() : nullptr,
-        m ? row_dual.data() : nullptr,
-        col_basis_status.data(),
-        m ? row_basis_status.data() : nullptr,
-        &model_status
-    );
-
-    out.x.assign(d, 0.0L);
-    for (size_t j = 0; j < d; ++j) out.x[j] = (long double)col_value[j];
-    out.t = (long double)col_value[t_col];
-
-    long double maxv = -std::numeric_limits<long double>::infinity();
-    for (size_t i = 0; i < m; ++i) {
-        long double ax = 0.0L;
-        for (size_t j = 0; j < d; ++j) ax += sys.A[i][j] * out.x[j];
-        maxv = std::max(maxv, ax - sys.rhs[i]);
-    }
-    out.max_violation = maxv;
-
-    out.feasible = (run_status == kHighsStatusOk &&
-                    model_status == kHighsModelStatusOptimal &&
-                    out.t <= tol &&
-                    out.max_violation <= tol);
+    out.backend_used = BackendKind::Highs;
+    highs_phase1::Result highs = highs_phase1::solve(sys.A, sys.rhs, tol);
+    out.x = std::move(highs.x);
+    out.max_violation = highs.max_violation;
+    out.t = highs.t;
+    out.feasible = highs.feasible;
     return out;
+}
+
+static SolveResult solve_feasibility_lp_custom(const LinearSystem& sys, long double tol) {
+    SolveResult out;
+    out.backend_used = BackendKind::Custom;
+    custom_phase1::Result custom = custom_phase1::solve(sys.A, sys.rhs, tol);
+    out.feasible = custom.feasible;
+    out.max_violation = custom.max_violation;
+    out.t = custom.t;
+    out.x = std::move(custom.x);
+    return out;
+}
+
+static SolveResult solve_feasibility_lp(const LinearSystem& sys, long double tol, BackendKind backend) {
+    if (backend == BackendKind::Highs) {
+        return solve_feasibility_lp_highs(sys, tol);
+    }
+    if (backend == BackendKind::Custom) {
+        return solve_feasibility_lp_custom(sys, tol);
+    }
+    SolveResult highs = solve_feasibility_lp_highs(sys, tol);
+    if (highs.feasible) return highs;
+    return solve_feasibility_lp_custom(sys, tol);
 }
 
 static std::vector<long double> build_hyperbolic_b(
@@ -552,13 +496,14 @@ struct Options {
     size_t axis_k = 0;
 
     long double eps = 1e-5L;
-    long double margin = 1.0L;
+    long double margin = 1e-3L;
     bool try_reflect = false;
     std::string output_format = "full";
     bool metadata_only = false;
 
     long double tol = 1e-10L;
     long double m_order_delta = 1e-4L;
+    BackendKind solver_backend = BackendKind::Auto;
 };
 
 static void print_usage(const char* argv0) {
@@ -571,10 +516,11 @@ static void print_usage(const char* argv0) {
         << "Options:\n"
         << "  --hyperbolic-axis [K]   If K omitted, tries all axes 0..N-1\n"
         << "  --axis-eps E            Default 1e-5\n"
-        << "  --margin M              Default 1.0\n"
+        << "  --margin M              Default 0.001\n"
         << "  --try-reflect           Also try reflected O-matrix\n"
         << "  --output-format compact|full|json\n"
-        << "  --metadata-only         Filter mode: diagnostics only\n";
+        << "  --metadata-only         Filter mode: diagnostics only\n"
+        << "  --solver highs|custom|auto\n";
 }
 
 struct AttemptResult {
@@ -596,6 +542,7 @@ struct AttemptResult {
     long double t = std::numeric_limits<long double>::infinity();
     long double max_violation = std::numeric_limits<long double>::infinity();
     long double worst_raw = std::numeric_limits<long double>::infinity();
+    BackendKind solver_backend = BackendKind::Highs;
 
     std::string error;
     std::vector<long double> m_orig;
@@ -679,7 +626,8 @@ static AttemptResult run_attempt(
     long double eps,
     long double margin,
     long double tol,
-    long double m_order_delta
+    long double m_order_delta,
+    BackendKind solver_backend
 ) {
     AttemptResult res;
     res.axis_input = axis_original;
@@ -705,42 +653,74 @@ static AttemptResult run_attempt(
     try {
         const size_t axis_line = 0;
         std::vector<long double> b = build_hyperbolic_b(rotated, axis_line, eps);
-        const bool m_order_increasing = true;
-        LinearSystem sys = build_linear_system_for_m(
-            rotated, b, axis_line, margin, m_order_increasing, m_order_delta
-        );
-        SolveResult sol = solve_feasibility_lp(sys, tol);
-
-        std::vector<long double> m(rotated.n, 0.0L);
-        m[axis_line] = 0.0L;
-        for (size_t line = 0; line < rotated.n; ++line) {
-            if (line == axis_line) continue;
-            int vi = sys.var_index[line];
-            if (vi >= 0 && (size_t)vi < sol.x.size()) m[line] = sol.x[(size_t)vi];
-        }
-
-        long double worst_raw = -std::numeric_limits<long double>::infinity();
         auto specs = build_edge_specs(rotated);
-        for (const auto& s : specs) {
-            long double c1 = m[s.m1] - m[s.m2];
-            long double c2 = m[s.m3] - m[s.m4];
-            long double raw = (b[s.b1] - b[s.b2]) * c1 - (b[s.b3] - b[s.b4]) * c2;
-            worst_raw = std::max(worst_raw, raw);
-        }
+        struct OrderCandidate {
+            bool m_order_increasing = true;
+            bool feasible = false;
+            long double t = std::numeric_limits<long double>::infinity();
+            long double max_violation = std::numeric_limits<long double>::infinity();
+            long double worst_raw = std::numeric_limits<long double>::infinity();
+            BackendKind solver_backend = BackendKind::Highs;
+            std::vector<long double> m;
+        };
 
-        res.t = sol.t;
-        res.max_violation = sol.max_violation;
-        res.worst_raw = worst_raw;
-        res.feasible = (sol.feasible && worst_raw <= (-margin + tol));
+        auto solve_with_order = [&](bool m_order_increasing) {
+            OrderCandidate cand;
+            cand.m_order_increasing = m_order_increasing;
+
+            LinearSystem sys = build_linear_system_for_m(
+                rotated, b, axis_line, margin, m_order_increasing, m_order_delta
+            );
+            SolveResult sol = solve_feasibility_lp(sys, tol, solver_backend);
+
+            std::vector<long double> m(rotated.n, 0.0L);
+            m[axis_line] = 0.0L;
+            for (size_t line = 0; line < rotated.n; ++line) {
+                if (line == axis_line) continue;
+                int vi = sys.var_index[line];
+                if (vi >= 0 && (size_t)vi < sol.x.size()) m[line] = sol.x[(size_t)vi];
+            }
+
+            long double worst_raw = -std::numeric_limits<long double>::infinity();
+            for (const auto& s : specs) {
+                long double c1 = m[s.m1] - m[s.m2];
+                long double c2 = m[s.m3] - m[s.m4];
+                long double raw = (b[s.b1] - b[s.b2]) * c1 - (b[s.b3] - b[s.b4]) * c2;
+                worst_raw = std::max(worst_raw, raw);
+            }
+
+            cand.t = sol.t;
+            cand.max_violation = sol.max_violation;
+            cand.worst_raw = worst_raw;
+            cand.feasible = (sol.feasible && worst_raw <= (-margin + tol));
+            cand.solver_backend = sol.backend_used;
+            cand.m = std::move(m);
+            return cand;
+        };
+
+        OrderCandidate inc = solve_with_order(true);
+        OrderCandidate dec = solve_with_order(false);
+        auto better_candidate = [](const OrderCandidate& a, const OrderCandidate& b) {
+            if (a.feasible != b.feasible) return a.feasible;
+            if (a.t != b.t) return a.t < b.t;
+            return a.max_violation < b.max_violation;
+        };
+        const OrderCandidate& best = better_candidate(inc, dec) ? inc : dec;
+
+        res.t = best.t;
+        res.max_violation = best.max_violation;
+        res.worst_raw = best.worst_raw;
+        res.feasible = best.feasible;
         res.valid = true;
-        res.m_order_increasing = true;
+        res.m_order_increasing = best.m_order_increasing;
+        res.solver_backend = best.solver_backend;
 
         auto new_to_original = build_new_to_original_map(original.n, reflected, rotation);
         res.m_orig.assign(original.n, 0.0L);
         res.b_orig.assign(original.n, 0.0L);
         for (size_t nw = 0; nw < original.n; ++nw) {
             size_t orig = new_to_original[nw];
-            res.m_orig[orig] = m[nw];
+            res.m_orig[orig] = best.m[nw];
             res.b_orig[orig] = b[nw];
         }
     } catch (const std::exception& e) {
@@ -787,7 +767,8 @@ static void print_result(const AttemptResult& r, const std::string& format, bool
                   << ",\"output_rotation_phi\":" << r.output_rotation_phi
                   << ",\"t\":" << r.t
                   << ",\"max_violation\":" << r.max_violation
-                  << ",\"worst_raw\":" << r.worst_raw;
+                  << ",\"worst_raw\":" << r.worst_raw
+                  << ",\"solver\":\"" << backend_kind_name(r.solver_backend) << "\"";
         if (!r.error.empty()) std::cout << ",\"error\":\"" << r.error << "\"";
         if (include_lines && r.m_orig.size() == r.n && r.b_orig.size() == r.n) {
             std::cout << ",\"lines\":[";
@@ -816,7 +797,8 @@ static void print_result(const AttemptResult& r, const std::string& format, bool
                   << " output_rotation_phi=" << r.output_rotation_phi
                   << " t=" << r.t
                   << " max_violation=" << r.max_violation
-                  << " worst_raw=" << r.worst_raw;
+                  << " worst_raw=" << r.worst_raw
+                  << " solver=" << backend_kind_name(r.solver_backend);
         if (!r.error.empty()) std::cout << " error=" << r.error;
         std::cout << "\n";
         return;
@@ -835,7 +817,8 @@ static void print_result(const AttemptResult& r, const std::string& format, bool
               << " output_rotation_phi=" << r.output_rotation_phi
               << " t=" << r.t
               << " max_violation=" << r.max_violation
-              << " worst_raw=" << r.worst_raw;
+              << " worst_raw=" << r.worst_raw
+              << " solver=" << backend_kind_name(r.solver_backend);
     if (!r.error.empty()) std::cout << " error=" << r.error;
     std::cout << "\n";
 
@@ -851,15 +834,15 @@ static AttemptResult solve_case(const std::vector<size_t>& gens, const Options& 
     std::vector<AttemptResult> attempts;
     if (opt.axis_set) {
         if (opt.axis_k >= o.n) throw std::runtime_error("--hyperbolic-axis out of range");
-        attempts.push_back(run_attempt(o, gens, opt.axis_k, false, opt.eps, opt.margin, opt.tol, opt.m_order_delta));
+        attempts.push_back(run_attempt(o, gens, opt.axis_k, false, opt.eps, opt.margin, opt.tol, opt.m_order_delta, opt.solver_backend));
         if (opt.try_reflect) {
-            attempts.push_back(run_attempt(o, gens, opt.axis_k, true, opt.eps, opt.margin, opt.tol, opt.m_order_delta));
+            attempts.push_back(run_attempt(o, gens, opt.axis_k, true, opt.eps, opt.margin, opt.tol, opt.m_order_delta, opt.solver_backend));
         }
     } else {
         for (size_t k = 0; k < o.n; ++k) {
-            attempts.push_back(run_attempt(o, gens, k, false, opt.eps, opt.margin, opt.tol, opt.m_order_delta));
+            attempts.push_back(run_attempt(o, gens, k, false, opt.eps, opt.margin, opt.tol, opt.m_order_delta, opt.solver_backend));
             if (opt.try_reflect) {
-                attempts.push_back(run_attempt(o, gens, k, true, opt.eps, opt.margin, opt.tol, opt.m_order_delta));
+                attempts.push_back(run_attempt(o, gens, k, true, opt.eps, opt.margin, opt.tol, opt.m_order_delta, opt.solver_backend));
             }
         }
     }
@@ -884,6 +867,7 @@ static AttemptResult solve_case(const std::vector<size_t>& gens, const Options& 
         no.reflected = false;
         no.margin = opt.margin;
         no.eps = opt.eps;
+        no.solver_backend = opt.solver_backend;
         no.feasible = false;
         no.valid = false;
         no.error = "SKIP_UNROTATABLE";
@@ -960,6 +944,11 @@ int main(int argc, char** argv) {
             }
             if (arg == "--metadata-only") {
                 opt.metadata_only = true;
+                continue;
+            }
+            if (arg == "--solver") {
+                if (i + 1 >= argc) throw std::runtime_error("Missing value for --solver");
+                opt.solver_backend = parse_backend_kind(argv[++i]);
                 continue;
             }
             if (!arg.empty() && arg[0] != '-') {
