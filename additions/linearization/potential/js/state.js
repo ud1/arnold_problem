@@ -31,10 +31,44 @@
     lineLayer: document.getElementById("lineLayer"),
     pointLayer: document.getElementById("pointLayer"),
     clipRect: document.getElementById("clipRect"),
+    viewInfoEl: document.getElementById("viewInfo"),
+    polyStatsHeadEl: document.getElementById("polyStatsHead"),
+    polyStatsBodyEl: document.getElementById("polyStatsBody"),
+    geoInfoEl: document.getElementById("geoInfo"),
     statusEl: document.getElementById("status"),
   };
 
-  App.setStatus = function setStatus(text) {
+  App.setViewInfo = function setViewInfo(text) {
+    if (!App.el.viewInfoEl) return;
+    App.el.viewInfoEl.textContent = text;
+  };
+
+  App.setGeoInfo = function setGeoInfo(text) {
+    if (!App.el.geoInfoEl) return;
+    App.el.geoInfoEl.textContent = text;
+  };
+
+  function refreshStatus() {
+    if (!App.el.statusEl) return;
+    const base = typeof App.state._statusBase === "string" ? App.state._statusBase : "";
+    const notes = Array.isArray(App.state._statusNotes) ? App.state._statusNotes : [];
+    const text = notes.length ? `${base}\n${notes.join("\n")}` : base;
     App.el.statusEl.textContent = text;
+  }
+
+  App.setStatusBase = function setStatusBase(text) {
+    App.state._statusBase = String(text || "");
+    refreshStatus();
+  };
+
+  App.appendStatus = function appendStatus(note) {
+    if (!App.el.statusEl) return;
+    if (!Array.isArray(App.state._statusNotes)) App.state._statusNotes = [];
+    App.state._statusNotes.push(String(note || ""));
+    refreshStatus();
+  };
+
+  App.setStatus = function setStatus(text) {
+    App.setStatusBase(text);
   };
 })();

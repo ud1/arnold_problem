@@ -144,6 +144,84 @@
     return keys.map(k => `${prefix}${k}=${map.get(k)}`).join(" ");
   }
 
+  function cellSideCount(c) {
+    const v = Number.isFinite(c.sideCount) ? c.sideCount : (c.poly.length + (c.external ? 1 : 0));
+    return Number.isFinite(v) ? Math.max(0, Math.floor(v)) : null;
+  }
+
+  function buildPolySideMap(cells) {
+    const map = new Map();
+    let maxSides = 0;
+    for (const c of cells) {
+      const sides = cellSideCount(c);
+      if (!sides || sides < 3) continue;
+      maxSides = Math.max(maxSides, sides);
+      map.set(sides, (map.get(sides) || 0) + 1);
+    }
+    return { map, maxSides };
+  }
+
+  function buildPolySideMapsByColor(cells) {
+    const black = new Map();
+    const white = new Map();
+    let maxSides = 0;
+    for (const c of cells) {
+      const sides = cellSideCount(c);
+      if (!sides || sides < 3) continue;
+      maxSides = Math.max(maxSides, sides);
+      const bucket = isBlack(c) ? black : white;
+      bucket.set(sides, (bucket.get(sides) || 0) + 1);
+    }
+    return { black, white, maxSides };
+  }
+
+  function sumMapValues(map) {
+    let s = 0;
+    for (const v of map.values()) s += v;
+    return s;
+  }
+
+  function renderPolyStatsTable(opts) {
+    const head = App.el.polyStatsHeadEl;
+    const body = App.el.polyStatsBodyEl;
+    if (!head || !body) return;
+
+    const maxSides = Math.max(3, opts.maxSides || 3);
+
+    head.textContent = "";
+    const addHeadCell = (text) => {
+      const th = document.createElement("th");
+      th.textContent = text;
+      head.appendChild(th);
+    };
+    const th = document.createElement("th");
+    th.textContent = "Polygons";
+    th.colSpan = 2;
+    head.appendChild(th);
+    for (let k = 3; k <= maxSides; k++) addHeadCell(String(k));
+
+    body.textContent = "";
+    for (const row of opts.rows) {
+      const tr = document.createElement("tr");
+      if (row.blackRow) tr.classList.add("black-row");
+
+      const th = document.createElement("th");
+      th.scope = "row";
+      th.textContent = row.label || "";
+      tr.appendChild(th);
+
+      const addCell = (val) => {
+        const td = document.createElement("td");
+        td.textContent = String(val);
+        tr.appendChild(td);
+      };
+
+      addCell(row.total);
+      for (let k = 3; k <= maxSides; k++) addCell(row.map.get(k) || 0);
+      body.appendChild(tr);
+    }
+  }
+
   function buildEdgeQualityStats() {
     const lines = App.state.lines;
     const n = lines.length;
@@ -200,21 +278,45 @@
     if (App.state.flags.showPoints) drawIntersections();
 
     chooseColorOrientation();
-    const totalCells = App.state.cells.length;
-    const extCount = App.state.cells.filter(c => c.external).length;
+    const includedCells = App.state.flags.showOuter
+      ? App.state.cells
+      : App.state.cells.filter(c => !c.external);
+    const totalCells = includedCells.length;
+    const extCount = includedCells.filter(c => c.external).length;
     const innerCount = totalCells - extCount;
-    const sideStats = buildColorSideStats();
-    const blackSideText = formatColorSideStats("b", sideStats.black);
-    const whiteSideText = formatColorSideStats("w", sideStats.white);
     const edgeQuality = App.computeEdgeQuality();
     const g = App.buildGeoMatrix();
-    App.setStatus(
-`n=${App.state.lines.length} points=${App.state.intersections.length} cells=${innerCount}+${extCount}
-${blackSideText}
-${whiteSideText}
-L=${edgeQuality ? edgeQuality.maxLen.toFixed(3) : "n/a"} S=${edgeQuality ? edgeQuality.minLen.toFixed(4) : "n/a"} G=${edgeQuality ? edgeQuality.ratio.toFixed(3) : "n/a"}
-zoom=${App.state.view.zoom.toFixed(4)} pan=(${App.state.view.panX.toFixed(1)},${App.state.view.panY.toFixed(1)})
+    App.setStatusBase(`Lines: ${App.state.lines.length}, Points: ${App.state.intersections.length}`);
+
+    App.setGeoInfo(
+`L=${edgeQuality ? edgeQuality.maxLen.toFixed(3) : "n/a"} S=${edgeQuality ? edgeQuality.minLen.toFixed(4) : "n/a"} G=${edgeQuality ? edgeQuality.ratio.toFixed(3) : "n/a"}
 geo=[${g.map(v => v.toFixed(2)).join(",")}]`
+    );
+
+    if (App.state.flags.checkerMode) {
+      const maps = buildPolySideMapsByColor(includedCells);
+      const blackTotal = sumMapValues(maps.black);
+      const whiteTotal = sumMapValues(maps.white);
+      renderPolyStatsTable({
+        maxSides: maps.maxSides,
+        rows: [
+          { label: "Black", map: maps.black, total: blackTotal, blackRow: true },
+          { label: "White", map: maps.white, total: whiteTotal, blackRow: false },
+        ],
+      });
+    } else {
+      const all = buildPolySideMap(includedCells);
+      renderPolyStatsTable({
+        maxSides: all.maxSides,
+        rows: [
+          { label: "Total", map: all.map, total: sumMapValues(all.map), blackRow: false },
+        ],
+      });
+    }
+
+    App.setViewInfo(
+`zoom=${App.state.view.zoom.toFixed(4)}
+x=${App.state.view.panX.toFixed(1)} y=${App.state.view.panY.toFixed(1)}`
     );
   };
 })();

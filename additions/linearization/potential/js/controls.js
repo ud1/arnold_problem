@@ -293,11 +293,11 @@
 
   function optimizeTransformAutomatically() {
     if (!App.state.lines || App.state.lines.length < 2) {
-      App.setStatus("Нужно как минимум 2 линии для автооптимизации.");
+      App.appendStatus("Need at least 2 lines for auto-optimization.");
       return;
     }
     if (typeof App.computeEdgeQuality !== "function") {
-      App.setStatus("Метрика качества недоступна.");
+      App.appendStatus("Quality metric is unavailable.");
       return;
     }
 
@@ -343,8 +343,8 @@
     const fmt = (x) => (Number.isFinite(x) ? x.toFixed(3) : "n/a");
     const note = improved
       ? `Auto: G ${fmt(beforeScore)} -> ${fmt(best.score)}`
-      : "Auto: улучшений не найдено в заданных пределах";
-    App.setStatus(`${App.el.statusEl.textContent}\n${note}`);
+      : "Auto: no improvements found within the given bounds";
+    App.appendStatus(note);
 
     autoBtn.disabled = false;
     autoBtn.textContent = prevLabel;
@@ -377,7 +377,7 @@
   async function pasteFromClipboardToInput() {
     const input = document.getElementById("inputLog");
     if (!navigator.clipboard || !navigator.clipboard.readText) {
-      App.setStatus("Clipboard API недоступен в этом браузере.");
+      App.appendStatus("Clipboard API is not available in this browser.");
       return;
     }
     try {
@@ -385,7 +385,7 @@
       input.value = text;
       input.focus();
     } catch (_err) {
-      App.setStatus("Не удалось прочитать буфер обмена.");
+      App.appendStatus("Failed to read from clipboard.");
     }
   }
 
@@ -405,15 +405,25 @@
     URL.revokeObjectURL(url);
   }
 
-  function syncColoredModeAvailability() {
+  function syncCheckerModeAvailability() {
     const checker = document.getElementById("checkerMode");
     const colored = document.getElementById("coloredMode");
-    if (!checker || !colored) return;
+    const defects = document.getElementById("highlightDefects");
+    if (!checker) return;
     const enabled = checker.checked;
-    colored.disabled = !enabled;
-    if (!enabled && colored.checked) {
-      colored.checked = false;
-      App.state.flags.coloredMode = false;
+    if (colored) {
+      colored.disabled = !enabled;
+      if (!enabled && colored.checked) {
+        colored.checked = false;
+        App.state.flags.coloredMode = false;
+      }
+    }
+    if (defects) {
+      defects.disabled = !enabled;
+      if (!enabled && defects.checked) {
+        defects.checked = false;
+        App.state.flags.highlightDefects = false;
+      }
     }
   }
 
@@ -477,11 +487,11 @@
     ["checkerMode", "coloredMode", "highlightDefects", "showOuter", "showPoints"].forEach(id => {
       document.getElementById(id).addEventListener("change", (e) => {
         App.state.flags[id] = e.target.checked;
-        if (id === "checkerMode") syncColoredModeAvailability();
+        if (id === "checkerMode") syncCheckerModeAvailability();
         renderScene();
       });
     });
-    syncColoredModeAvailability();
+    syncCheckerModeAvailability();
 
     wireTransformButtons();
 
@@ -549,7 +559,7 @@
         }
       }
     }
-    syncColoredModeAvailability();
+    syncCheckerModeAvailability();
 
     applyInputAndRebuild(false);
     schedulePersist();

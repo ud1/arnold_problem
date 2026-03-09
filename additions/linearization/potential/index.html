@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -39,17 +39,41 @@
       min-height: 300px;
       position: relative;
     }
+    .viewer-floor {
+      padding: 0;
+    }
+    .viewer-floor-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: nowrap;
+      align-items: flex-start;
+    }
+    .viewer-info {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+      white-space: pre-line;
+      line-height: 1.25;
+      color: var(--muted);
+    }
+    .viewer-export {
+      margin-left: auto;
+    }
     .panel {
       border: none;
       border-radius: 0;
       background: #ece9e3;
       padding: 12px;
       overflow: auto;
+      display: flex;
+      flex-direction: column;
     }
     .section {
       margin: 0 0 10px 0;
     }
     .section:last-child { margin-bottom: 0; }
+    .panel-footer {
+      margin-top: auto;
+    }
     .section h2 {
       margin: 8px 0 4px;
       font-size: 13px;
@@ -110,6 +134,17 @@
       flex-wrap: wrap;
       margin-top: 8px;
     }
+    .mode-rows {
+      display: grid;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .mode-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
     .input-actions {
       display: flex;
       justify-content: space-between;
@@ -139,6 +174,42 @@
       color: var(--muted);
       min-width: 44px;
       letter-spacing: 0.01em;
+    }
+    .poly-stats-wrap {
+      overflow-x: auto;
+      margin-top: 6px;
+    }
+    table.poly-stats {
+      width: auto;
+      border-collapse: collapse;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+    }
+    .poly-stats th,
+    .poly-stats td {
+      padding: 2px 6px;
+      white-space: nowrap;
+      border: 0;
+      text-align: right;
+    }
+    .poly-stats thead th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .poly-stats th:first-child,
+    .poly-stats td:first-child,
+    .poly-stats th:first-child { text-align: left; padding-left: 0; }
+    .poly-stats tbody tr.black-row th {
+      background: #000;
+      color: #fff;
+    }
+    .geo-info {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+      white-space: pre-line;
+      line-height: 1.25;
+      color: var(--muted);
+      margin-top: 6px;
     }
     .transform-pair {
       display: flex;
@@ -176,11 +247,11 @@
       font-family: "IBM Plex Mono", monospace;
       font-size: 12px;
       white-space: pre-wrap;
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 8px;
-      min-height: 72px;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      padding: 0;
+      min-height: 0;
     }
     svg { width: 100%; height: 100%; display: block; touch-action: none; }
     @media (max-width: 980px) {
@@ -209,25 +280,45 @@
     <aside class="panel">
       <div class="section">
         <div class="input-actions">
-          <button id="pasteBtn" class="secondary">Вставить</button>
-          <button id="exportBtn" class="secondary">Экспорт SVG</button>
+          <button id="parseBtn">Parse</button>
+          <button id="pasteBtn" class="secondary">Paste</button>
         </div>
-        <textarea id="inputLog" spellcheck="false" placeholder="#LINES_BEGIN\nm,b\n-28.3,-15.8\n...\n#LINES_END\n\nили\n[(-17.5,-25.7), (-8.02,3.97), ...]"></textarea>
-        <div class="buttons">
-          <button id="parseBtn">Распарсить</button>
-          <button id="fitBtn" class="secondary">Fit</button>
-          <button id="resetViewBtn" class="secondary">Reset View</button>
+        <textarea id="inputLog" spellcheck="false" placeholder="#LINES_BEGIN\nm,b\n-28.3,-15.8\n...\n#LINES_END\n\nor\n[(-17.5,-25.7), (-8.02,3.97), ...]"></textarea>
+      </div>
+
+      <div class="section">
+        <div class="viewer-floor">
+          <div class="viewer-floor-actions">
+            <button id="fitBtn" class="secondary">Fit</button>
+            <button id="resetViewBtn" class="secondary">Reset View</button>
+            <div id="viewInfo" class="viewer-info">zoom=0.0485
+x=17.5 y=2.8</div>
+            <button id="exportBtn" class="secondary viewer-export">Export SVG</button>
+          </div>
         </div>
       </div>
 
       <div class="section">
-        <h2>Режим</h2>
-        <div class="buttons">
-          <label><input type="checkbox" id="checkerMode" checked /> Шахматная раскраска</label>
-          <label><input type="checkbox" id="coloredMode" /> Цветные</label>
-          <label><input type="checkbox" id="highlightDefects" /> Подсветить дефекты</label>
-          <label><input type="checkbox" id="showOuter" checked /> Внешние области</label>
-          <label><input type="checkbox" id="showPoints" /> Точки</label>
+        <h2>Mode</h2>
+        <div class="mode-rows">
+          <div class="mode-row">
+            <label><input type="checkbox" id="checkerMode" checked /> Chess-like fill</label>
+            <label><input type="checkbox" id="showPoints" /> Points</label>
+          </div>
+          <div class="mode-row">
+            <label><input type="checkbox" id="showOuter" checked /> Outer</label>
+            <label><input type="checkbox" id="coloredMode" /> Colored</label>
+            <label><input type="checkbox" id="highlightDefects" /> Highlight defects</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="poly-stats-wrap">
+          <table class="poly-stats">
+            <thead><tr id="polyStatsHead"></tr></thead>
+            <tbody id="polyStatsBody"></tbody>
+          </table>
         </div>
       </div>
 
@@ -239,6 +330,7 @@
             <button id="resetTransformBtn" class="secondary">Reset</button>
           </div>
         </div>
+        <div id="geoInfo" class="geo-info"></div>
         <div class="transform-rows">
           <div class="transform-row">
             <span class="transform-row-label">Rotate</span>
@@ -275,9 +367,8 @@
         </div>
       </div>
 
-      <div class="section">
-        <h2>Статус</h2>
-        <div id="status" class="status"></div>
+      <div class="section panel-footer">
+        <div id="status" class="status" aria-live="polite"></div>
       </div>
     </aside>
   </div>
