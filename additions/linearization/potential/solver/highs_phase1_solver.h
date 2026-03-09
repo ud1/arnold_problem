@@ -4,7 +4,13 @@
 #include <limits>
 #include <vector>
 
+#if __has_include("interfaces/highs_c_api.h")
 #include "interfaces/highs_c_api.h"
+#elif __has_include("/mnt/c/Data/git/arnold-research/code/HiGHS/highs/interfaces/highs_c_api.h")
+#include "/mnt/c/Data/git/arnold-research/code/HiGHS/highs/interfaces/highs_c_api.h"
+#else
+#error "highs_c_api.h not found. Add HiGHS include path or install headers."
+#endif
 
 namespace highs_phase1 {
 

@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <vector>
 
+#include "common/projective_rotation.h"
 #include "common/solver_backend.h"
 #include "solver/custom_phase1_solver.h"
 #include "solver/highs_phase1_solver.h"
@@ -113,103 +114,15 @@ struct OMatrix {
     }
 
     bool has_parallels() const {
-        for (int p : parallels) {
-            if (p >= 0) return true;
-        }
-        return false;
+        return has_parallels_raw(parallels);
     }
 
-    bool sphere_rotate(size_t val, OMatrix& out) const {
-        if (n == 0) return false;
-        if (n % 2 == 0) return false;
-        if (val >= n) return false;
-        if (has_parallels()) return false;
-        if (intersections[val].size() != n - 1) return false;
-        for (size_t i = 0; i < n; ++i) {
-            if (intersections[i].size() != n - 1) return false;
-        }
-
-        const size_t ext = n;
-        std::vector<int> reord(n + 1, -1);
-        for (size_t i = 0; i < n - 1; ++i) {
-            size_t line = intersections[val][i];
-            if (line >= n) return false;
-            if (line == val) return false;
-            if (reord[line] >= 0) return false;
-            reord[line] = (int)i;
-        }
-        reord[ext] = (int)(n - 1);
-
-        for (size_t i = 0; i < n; ++i) {
-            if (i != val && reord[i] < 0) return false;
-        }
-
-        std::vector<std::vector<size_t>> temp(n + 1);
-        for (size_t i = 0; i < n; ++i) {
-            temp[i] = intersections[i];
-            temp[i].push_back(ext);
-        }
-        temp[ext].resize(n);
-        for (size_t i = 0; i < n; ++i) temp[ext][i] = i;
-
+    bool projective_rotate(size_t val, OMatrix& out) const {
         OMatrix r;
         r.n = n;
-        r.intersections.assign(n, {});
-        r.parallels.assign(n, -1);
-
-        for (size_t i = 0; i < n; ++i) {
-            size_t v = temp[val][i];
-            if (v >= temp.size()) return false;
-            const auto& temp_line = temp[v];
-            if (temp_line.size() != n) return false;
-
-            size_t val_pos = temp_line.size();
-            for (size_t j = 0; j < temp_line.size(); ++j) {
-                if (temp_line[j] == val) {
-                    val_pos = j;
-                    break;
-                }
-            }
-            if (val_pos == temp_line.size()) return false;
-
-            auto& new_line = r.intersections[i];
-            new_line.reserve(n - 1);
-
-            if (v < val) {
-                for (size_t j = val_pos; j > 0; --j) {
-                    size_t old = temp_line[j - 1];
-                    if (old >= reord.size()) return false;
-                    int mapped = reord[old];
-                    if (mapped < 0) return false;
-                    new_line.push_back((size_t)mapped);
-                }
-                for (size_t j = n; j > val_pos + 1; --j) {
-                    size_t old = temp_line[j - 1];
-                    if (old >= reord.size()) return false;
-                    int mapped = reord[old];
-                    if (mapped < 0) return false;
-                    new_line.push_back((size_t)mapped);
-                }
-            } else {
-                for (size_t j = val_pos + 1; j < n; ++j) {
-                    size_t old = temp_line[j];
-                    if (old >= reord.size()) return false;
-                    int mapped = reord[old];
-                    if (mapped < 0) return false;
-                    new_line.push_back((size_t)mapped);
-                }
-                for (size_t j = 0; j < val_pos; ++j) {
-                    size_t old = temp_line[j];
-                    if (old >= reord.size()) return false;
-                    int mapped = reord[old];
-                    if (mapped < 0) return false;
-                    new_line.push_back((size_t)mapped);
-                }
-            }
-
-            if (new_line.size() != n - 1) return false;
+        if (!projective_rotate_raw(intersections, parallels, n, val, r.intersections, r.parallels)) {
+            return false;
         }
-
         out = std::move(r);
         return true;
     }
@@ -503,32 +416,28 @@ static SolveResult solve_feasibility_lp_custom(const LinearSystem& sys, long dou
 }
 
 static SolveResult solve_feasibility_lp(const LinearSystem& sys, long double tol, BackendKind backend) {
-    if (backend == BackendKind::Highs) {
-        return solve_feasibility_lp_highs(sys, tol);
-    }
-    if (backend == BackendKind::Custom) {
-        return solve_feasibility_lp_custom(sys, tol);
-    }
-    SolveResult highs = solve_feasibility_lp_highs(sys, tol);
-    if (highs.feasible) return highs;
-    return solve_feasibility_lp_custom(sys, tol);
+    return solve_with_backend_fallback<SolveResult>(
+        backend,
+        [&]() { return solve_feasibility_lp_highs(sys, tol); },
+        [&]() { return solve_feasibility_lp_custom(sys, tol); }
+    );
 }
 
 struct SolveParams {
     long double tol = 1e-10L;
-    BackendKind backend = BackendKind::Auto;
+    BackendKind backend = BackendKind::Highs;
 };
 
 struct AttemptResult {
     bool sat = false;
-    int sphere_rotation = -1;
+    int projective_rotation = -1;
     int rotation = 0;
     size_t n = 0;
     size_t gens_count = 0;
     size_t axis_left = 0;
     size_t axis_right = 0;
     long double axis_eps = 0.0L;
-    long double margin_target = 0.0L;
+    long double margin = 0.0L;
     long double t = std::numeric_limits<long double>::infinity();
     long double max_violation_lp = std::numeric_limits<long double>::infinity();
     long double worst_raw = std::numeric_limits<long double>::infinity();
@@ -625,7 +534,7 @@ static AttemptResult solve_for_omatrix(
     out.axis_left = br.axis_left;
     out.axis_right = br.axis_right;
     out.axis_eps = axis.eps;
-    out.margin_target = strict_margin;
+    out.margin = strict_margin;
     out.t = sr.t;
     out.max_violation_lp = sr.max_violation;
     out.worst_raw = worst_raw;
@@ -680,42 +589,42 @@ static AttemptResult solve_case_with_rotations(
     return best;
 }
 
-static AttemptResult solve_case_with_sphere_and_rotations(
+static AttemptResult solve_case_with_projective_and_rotations(
     const OMatrix& base,
     size_t gens_count,
     const AxisModeConfig& axis,
     long double strict_margin,
     bool all_rotations,
-    bool sphere_rotations,
-    int& tried_sphere_rotations,
+    bool projective_rotations,
+    int& tried_projective_rotations,
     int& tried_plane_rotations,
     const SolveParams& solve_params
 ) {
-    tried_sphere_rotations = 0;
+    tried_projective_rotations = 0;
     tried_plane_rotations = 0;
 
     AttemptResult best;
     bool have_best = false;
 
-    const int sphere_count = sphere_rotations ? (int)base.n : 1;
-    for (int s = 0; s < sphere_count; ++s) {
+    const int projective_count = projective_rotations ? (int)base.n : 1;
+    for (int s = 0; s < projective_count; ++s) {
         OMatrix current_base;
-        int sphere_tag = -1;
-        if (sphere_rotations) {
-            if (!base.sphere_rotate((size_t)s, current_base)) continue;
+        int projective_tag = -1;
+        if (projective_rotations) {
+            if (!base.projective_rotate((size_t)s, current_base)) continue;
             if (!validate_omatrix(current_base, true)) continue;
-            sphere_tag = s;
+            projective_tag = s;
         } else {
             current_base = base;
             if (!validate_omatrix(current_base, false)) continue;
         }
-        ++tried_sphere_rotations;
+        ++tried_projective_rotations;
 
         int local_tried_rotations = 0;
         AttemptResult cur = solve_case_with_rotations(
             current_base, gens_count, axis, strict_margin, all_rotations, local_tried_rotations, solve_params
         );
-        cur.sphere_rotation = sphere_tag;
+        cur.projective_rotation = projective_tag;
         tried_plane_rotations += local_tried_rotations;
 
         if (!have_best) {
@@ -733,7 +642,7 @@ static AttemptResult solve_case_with_sphere_and_rotations(
     }
 
     if (!have_best) {
-        throw std::runtime_error("No valid sphere/plane rotations available");
+        throw std::runtime_error("No valid projective/euclidean rotations available");
     }
     return best;
 }
@@ -875,17 +784,20 @@ static void print_lines_csv_block(const std::vector<long double>& m, const std::
 static void print_usage(const char* argv0) {
     std::cerr
         << "Usage:\n"
-        << "  " << argv0 << " --gens \"0 1 0 2 ...\" [--axis-pair [I,J]] [--axis-eps E] [--all-rotations] [--sphere-rotations] [--print-gens]\n"
-        << "  " << argv0 << " --gens-file path.txt [--axis-pair [I,J]] [--axis-eps E] [--all-rotations] [--sphere-rotations] [--print-gens]\n"
-        << "  cat input.txt | " << argv0 << " [--axis-pair [I,J]] [--axis-eps E] [--all-rotations] [--sphere-rotations] [--print-gens]\n"
+        << "  " << argv0 << " --gens \"0 1 0 2 ...\" [--axis [I,J]|-a [I,J]] [--axis-eps E] [--margin M] [--euclidean-rotations|-e] [--projective-rotations|-p] [--print-gens]\n"
+        << "  " << argv0 << " --gens-file path.txt [--axis [I,J]|-a [I,J]] [--axis-eps E] [--margin M] [--euclidean-rotations|-e] [--projective-rotations|-p] [--print-gens]\n"
+        << "  cat input.txt | " << argv0 << " [--axis [I,J]|-a [I,J]] [--axis-eps E] [--margin M] [--euclidean-rotations|-e] [--projective-rotations|-p] [--print-gens]\n"
         << "\n"
-        << "Only axis-pair mode is supported.\n"
-        << "  --axis-pair without I,J: anchor boundary lines 0 and n-1\n"
-        << "  --axis-pair I,J: anchor adjacent lines I and J\n"
-        << "  --all-rotations: iterate all valid O-matrix plane rotations\n"
-        << "  --sphere-rotations: iterate sphere rotations; implies --all-rotations\n"
+        << "Only axis mode is supported.\n"
+        << "  --axis without I,J (or -a): anchor boundary lines 0 and n-1\n"
+        << "  --axis I,J (or -a I,J): anchor adjacent lines I and J\n"
+        << "  --margin M: strict margin target (default 1.0)\n"
+        << "  --euclidean-rotations, -e: iterate all valid O-matrix plane rotations\n"
+        << "  --projective-rotations, -p: iterate projective rotations; implies --euclidean-rotations\n"
         << "  --print-gens: print generators for the O-matrix used to produce LINES\n"
-        << "  --solver highs|custom|auto: LP backend (default auto)\n";
+        << "  --print-sat-gens: in filter mode, print generators only for SAT cases\n"
+        << "  --print-sat-lines: in filter mode, print line equations only for SAT cases\n"
+        << "  --solver highs|custom|both: LP backend (default highs)\n";
 }
 
 int main(int argc, char** argv) {
@@ -895,11 +807,14 @@ int main(int argc, char** argv) {
         bool filter_mode = false;
 
         AxisModeConfig axis;
-        bool axis_pair_seen = false;
+        bool axis_seen = false;
         bool all_rotations = false;
-        bool sphere_rotations = false;
+        bool projective_rotations = false;
         bool print_gens = false;
+        bool print_sat_gens = false;
+        bool print_sat_lines = false;
         SolveParams solve_params;
+        long double strict_margin = 1.0L;
 
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
@@ -919,15 +834,15 @@ int main(int argc, char** argv) {
                 have_gens = true;
                 continue;
             }
-            if (arg == "--axis-pair") {
-                axis_pair_seen = true;
+            if (arg == "--axis" || arg == "-a") {
+                axis_seen = true;
                 axis.boundary_pair = true;
                 if (i + 1 < argc) {
                     std::string next = argv[i + 1];
                     if (!next.empty() && next[0] != '-' && next.find(',') != std::string::npos) {
                         size_t l = 0, r = 0;
                         if (!parse_axis_pair_spec(next, l, r)) {
-                            throw std::runtime_error("Invalid --axis-pair format, expected I,J");
+                            throw std::runtime_error("Invalid --axis format, expected I,J");
                         }
                         axis.boundary_pair = false;
                         axis.left = l;
@@ -942,17 +857,30 @@ int main(int argc, char** argv) {
                 axis.eps = std::stold(argv[++i]);
                 continue;
             }
-            if (arg == "--all-rotations") {
+            if (arg == "--margin") {
+                if (i + 1 >= argc) throw std::runtime_error("Missing value for --margin");
+                strict_margin = std::stold(argv[++i]);
+                continue;
+            }
+            if (arg == "--euclidean-rotations" || arg == "-e") {
                 all_rotations = true;
                 continue;
             }
-            if (arg == "--sphere-rotations") {
-                sphere_rotations = true;
+            if (arg == "--projective-rotations" || arg == "-p") {
+                projective_rotations = true;
                 all_rotations = true;
                 continue;
             }
             if (arg == "--print-gens") {
                 print_gens = true;
+                continue;
+            }
+            if (arg == "--print-sat-gens") {
+                print_sat_gens = true;
+                continue;
+            }
+            if (arg == "--print-sat-lines") {
+                print_sat_lines = true;
                 continue;
             }
             if (arg == "--solver") {
@@ -974,18 +902,19 @@ int main(int argc, char** argv) {
         if (!have_gens && !isatty(STDIN_FILENO)) {
             filter_mode = true;
         }
-        if (!axis_pair_seen) {
-            axis_pair_seen = true;
+        if (!axis_seen) {
+            axis_seen = true;
             axis.boundary_pair = true;
         }
         if (all_rotations && !axis.boundary_pair) {
-            throw std::runtime_error("--all-rotations supports only boundary axis mode");
+            throw std::runtime_error("--euclidean-rotations supports only boundary axis mode");
         }
-        if (sphere_rotations && !axis.boundary_pair) {
-            throw std::runtime_error("--sphere-rotations supports only boundary axis mode");
+        if (projective_rotations && !axis.boundary_pair) {
+            throw std::runtime_error("--projective-rotations supports only boundary axis mode");
         }
-
-        const long double strict_margin = 1.0L;
+        if (!(strict_margin > 0.0L) || !std::isfinite((double)strict_margin)) {
+            throw std::runtime_error("--margin must be finite and > 0");
+        }
 
         if (filter_mode) {
             auto cases = parse_filter_cases_from_stream(std::cin);
@@ -1007,26 +936,35 @@ int main(int argc, char** argv) {
                     }
                     try {
                         OMatrix o = make_omatrix(gens);
-                        int tried_sphere_rotations = 0;
+                        int tried_projective_rotations = 0;
                         int tried_plane_rotations = 0;
-                        AttemptResult res = solve_case_with_sphere_and_rotations(
-                            o, gens.size(), axis, strict_margin, all_rotations, sphere_rotations,
-                            tried_sphere_rotations, tried_plane_rotations, solve_params
+                        AttemptResult res = solve_case_with_projective_and_rotations(
+                            o, gens.size(), axis, strict_margin, all_rotations, projective_rotations,
+                            tried_projective_rotations, tried_plane_rotations, solve_params
                         );
 
                         std::cout << (res.sat ? "SAT" : "NO_SOLUTION")
                                   << " #" << (ci + 1)
                                   << " n=" << res.n
                                   << " gens=" << gens.size()
-                                  << " sphere_rotation=" << res.sphere_rotation
-                                  << " rotation=" << res.rotation
-                                  << " tried_sphere_rotations=" << tried_sphere_rotations
-                                  << " tried_plane_rotations=" << tried_plane_rotations
-                                  << " margin_target=" << (double)strict_margin
+                                  << " eucl_rot=" << res.rotation << "/" << tried_plane_rotations
+                                  << " proj_rot=" << res.projective_rotation << "/" << tried_projective_rotations
+                                  << " margin=" << std::setprecision(21) << (double)res.margin
                                   << " worst_raw=" << std::setprecision(18) << (double)res.worst_raw
                                   << " t=" << (double)res.t
                                   << " solver=" << backend_kind_name(res.solver_backend)
                                   << "\n";
+                        if (res.sat && print_sat_lines) {
+                            std::cout << "#LINES_BEGIN #" << (ci + 1) << "\n";
+                            std::cout << "m,b\n";
+                            for (size_t i = 0; i < res.m.size() && i < res.b.size(); ++i) {
+                                std::cout << (double)res.m[i] << "," << (double)res.b[i] << "\n";
+                            }
+                            std::cout << "#LINES_END #" << (ci + 1) << "\n";
+                        }
+                        if (res.sat && print_sat_gens) {
+                            print_generators_line(res.omatrix_gens, "GENS #" + std::to_string(ci + 1));
+                        }
                         if (print_gens) {
                             print_generators_line(res.omatrix_gens, "GENS #" + std::to_string(ci + 1));
                         }
@@ -1055,11 +993,11 @@ int main(int argc, char** argv) {
         if (gens.empty()) throw std::runtime_error("No valid generator numbers parsed");
 
         OMatrix o = make_omatrix(gens);
-        int tried_sphere_rotations = 0;
+        int tried_projective_rotations = 0;
         int tried_plane_rotations = 0;
-        AttemptResult res = solve_case_with_sphere_and_rotations(
-            o, gens.size(), axis, strict_margin, all_rotations, sphere_rotations,
-            tried_sphere_rotations, tried_plane_rotations, solve_params
+        AttemptResult res = solve_case_with_projective_and_rotations(
+            o, gens.size(), axis, strict_margin, all_rotations, projective_rotations,
+            tried_projective_rotations, tried_plane_rotations, solve_params
         );
 
         std::cout << std::setprecision(18);
@@ -1071,19 +1009,20 @@ int main(int argc, char** argv) {
 
         std::cout << "n=" << res.n
                   << " gens=" << res.gens_count
-                  << " sphere_rotation=" << res.sphere_rotation
                   << " rotation=" << res.rotation
-                  << " tried_sphere_rotations=" << tried_sphere_rotations
                   << " tried_plane_rotations=" << tried_plane_rotations
                   << " axis_left=" << res.axis_left
                   << " axis_right=" << res.axis_right
                   << " axis_eps=" << (double)res.axis_eps
-                  << " margin_target=" << (double)strict_margin
+                  << " margin=" << std::setprecision(21) << (double)res.margin
                   << " newton=0"
                   << " t=" << (double)res.t
                   << " max_violation_lp=" << (double)res.max_violation_lp
                   << " worst_raw=" << (double)res.worst_raw
                   << " solver=" << backend_kind_name(res.solver_backend)
+                  << "\n";
+        std::cout << "projective_rotation=" << res.projective_rotation
+                  << " tried_projective_rotations=" << tried_projective_rotations
                   << "\n";
 
         print_lines_csv_block(res.m, res.b);

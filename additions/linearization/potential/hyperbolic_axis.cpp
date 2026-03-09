@@ -9,10 +9,13 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <sys/wait.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
 
+#include "common/projective_rotation.h"
 #include "common/solver_backend.h"
 #include "solver/custom_phase1_solver.h"
 #include "solver/highs_phase1_solver.h"
@@ -143,6 +146,21 @@ struct OMatrix {
         }
 
         return r;
+    }
+
+    bool has_parallels() const {
+        return has_parallels_raw(parallels);
+    }
+
+    bool projective_rotate(size_t val, OMatrix& out) const {
+        OMatrix r;
+        r.n = n;
+        r.num_vertices = num_vertices;
+        if (!projective_rotate_raw(intersections, parallels, n, val, r.intersections, r.parallels)) {
+            return false;
+        }
+        out = std::move(r);
+        return true;
     }
 };
 
@@ -331,15 +349,11 @@ static SolveResult solve_feasibility_lp_custom(const LinearSystem& sys, long dou
 }
 
 static SolveResult solve_feasibility_lp(const LinearSystem& sys, long double tol, BackendKind backend) {
-    if (backend == BackendKind::Highs) {
-        return solve_feasibility_lp_highs(sys, tol);
-    }
-    if (backend == BackendKind::Custom) {
-        return solve_feasibility_lp_custom(sys, tol);
-    }
-    SolveResult highs = solve_feasibility_lp_highs(sys, tol);
-    if (highs.feasible) return highs;
-    return solve_feasibility_lp_custom(sys, tol);
+    return solve_with_backend_fallback<SolveResult>(
+        backend,
+        [&]() { return solve_feasibility_lp_highs(sys, tol); },
+        [&]() { return solve_feasibility_lp_custom(sys, tol); }
+    );
 }
 
 static std::vector<long double> build_hyperbolic_b(
@@ -440,7 +454,7 @@ static std::vector<size_t> extract_nonnegative_ints(const std::string& s) {
 static std::vector<std::vector<size_t>> parse_filter_cases_from_stream(std::istream& in) {
     std::vector<std::vector<size_t>> cases;
     std::vector<size_t> current;
-    bool active = false;
+    bool header_case_active = false;
     std::string line;
 
     while (std::getline(in, line)) {
@@ -450,14 +464,14 @@ static std::vector<std::vector<size_t>> parse_filter_cases_from_stream(std::istr
                 cases.push_back(current);
                 current.clear();
             }
-            active = true;
+            header_case_active = true;
             std::string tail = line.substr(close_paren_pos + 1);
             auto nums = extract_nonnegative_ints(tail);
             current.insert(current.end(), nums.begin(), nums.end());
             continue;
         }
 
-        if (active) {
+        if (header_case_active) {
             auto nums = extract_nonnegative_ints(line);
             current.insert(current.end(), nums.begin(), nums.end());
             continue;
@@ -467,10 +481,7 @@ static std::vector<std::vector<size_t>> parse_filter_cases_from_stream(std::istr
         if (trimmed.empty()) continue;
         if (is_numbers_only_line(trimmed)) {
             auto nums = extract_nonnegative_ints(trimmed);
-            if (!nums.empty()) {
-                active = true;
-                current.insert(current.end(), nums.begin(), nums.end());
-            }
+            if (!nums.empty()) cases.push_back(std::move(nums));
         }
     }
 
@@ -492,35 +503,42 @@ struct Options {
     bool have_gens = false;
     bool filter_mode = false;
 
-    bool axis_set = false;
     size_t axis_k = 0;
 
     long double eps = 1e-5L;
     long double margin = 1e-3L;
     bool try_reflect = false;
+    bool euclidean_rotations = false;
+    bool projective_rotations = false;
+    bool print_sat_gens = false;
+    bool print_sat_lines = false;
     std::string output_format = "full";
     bool metadata_only = false;
 
     long double tol = 1e-10L;
     long double m_order_delta = 1e-4L;
-    BackendKind solver_backend = BackendKind::Auto;
+    BackendKind solver_backend = BackendKind::Highs;
 };
 
 static void print_usage(const char* argv0) {
     std::cerr
         << "Usage:\n"
-        << "  " << argv0 << " --gens \"0 1 0 2 ...\" [--hyperbolic-axis [K]] [--axis-eps E] [--margin M] [--try-reflect]\n"
-        << "  " << argv0 << " --gens-file path.txt [--hyperbolic-axis [K]] [--axis-eps E] [--margin M] [--try-reflect]\n"
-        << "  cat input.txt | " << argv0 << " [--hyperbolic-axis [K]] [--axis-eps E] [--margin M] [--try-reflect]\n"
+        << "  " << argv0 << " --gens \"0 1 0 2 ...\" [--axis K|-a K] [--axis-eps E] [--margin M] [--try-reflect] [--euclidean-rotations|-e] [--projective-rotations|-p]\n"
+        << "  " << argv0 << " --gens-file path.txt [--axis K|-a K] [--axis-eps E] [--margin M] [--try-reflect] [--euclidean-rotations|-e] [--projective-rotations|-p]\n"
+        << "  cat input.txt | " << argv0 << " [--axis K|-a K] [--axis-eps E] [--margin M] [--try-reflect] [--euclidean-rotations|-e] [--projective-rotations|-p]\n"
         << "\n"
         << "Options:\n"
-        << "  --hyperbolic-axis [K]   If K omitted, tries all axes 0..N-1\n"
+        << "  --axis K, -a K          Axis index K (default 0)\n"
         << "  --axis-eps E            Default 1e-5\n"
         << "  --margin M              Default 0.001\n"
         << "  --try-reflect           Also try reflected O-matrix\n"
+        << "  --euclidean-rotations, -e  Try all Euclidean O-matrix rotations\n"
+        << "  --projective-rotations, -p  Try all projective O-matrix rotations\n"
+        << "  --print-sat-gens        Filter mode: print generators for SAT cases\n"
+        << "  --print-sat-lines       Filter mode: print line equations for SAT cases\n"
         << "  --output-format compact|full|json\n"
         << "  --metadata-only         Filter mode: diagnostics only\n"
-        << "  --solver highs|custom|auto\n";
+        << "  --solver highs|custom|both (default highs)\n";
 }
 
 struct AttemptResult {
@@ -542,6 +560,10 @@ struct AttemptResult {
     long double t = std::numeric_limits<long double>::infinity();
     long double max_violation = std::numeric_limits<long double>::infinity();
     long double worst_raw = std::numeric_limits<long double>::infinity();
+    int euclidean_rotation = 0;
+    int projective_rotation = -1;
+    int tried_projective_rotations = 1;
+    int tried_euclidean_rotations = 1;
     BackendKind solver_backend = BackendKind::Highs;
 
     std::string error;
@@ -748,6 +770,15 @@ static void print_lines_csv_block(const std::vector<long double>& m, const std::
     std::cout << "#LINES_END\n";
 }
 
+static void print_generators_line(const std::vector<size_t>& gens, const std::string& prefix = "GENS") {
+    std::cout << prefix << " [";
+    for (size_t i = 0; i < gens.size(); ++i) {
+        if (i) std::cout << " ";
+        std::cout << gens[i];
+    }
+    std::cout << "]\n";
+}
+
 static void print_result(const AttemptResult& r, const std::string& format, bool include_lines, size_t case_idx = 0) {
     const char* status = r.feasible ? "SAT" : "NO_SOLUTION";
 
@@ -757,6 +788,8 @@ static void print_result(const AttemptResult& r, const std::string& format, bool
         std::cout << "\"status\":\"" << status << "\""
                   << ",\"n\":" << r.n
                   << ",\"gens_count\":" << r.gens_count
+                  << ",\"projective_rotation\":" << r.projective_rotation
+                  << ",\"tried_projective_rotations\":" << r.tried_projective_rotations
                   << ",\"axis_input\":" << r.axis_input
                   << ",\"axis_used\":" << r.axis_used
                   << ",\"rotation\":" << r.rotation
@@ -787,6 +820,8 @@ static void print_result(const AttemptResult& r, const std::string& format, bool
         if (case_idx > 0) std::cout << " #" << case_idx;
         std::cout << " n=" << r.n
                   << " gens=" << r.gens_count
+                  << " projective_rotation=" << r.projective_rotation
+                  << " tried_projective_rotations=" << r.tried_projective_rotations
                   << " axis_input=" << r.axis_input
                   << " axis_used=" << r.axis_used
                   << " rotation=" << r.rotation
@@ -821,6 +856,9 @@ static void print_result(const AttemptResult& r, const std::string& format, bool
               << " solver=" << backend_kind_name(r.solver_backend);
     if (!r.error.empty()) std::cout << " error=" << r.error;
     std::cout << "\n";
+    std::cout << "projective_rotation=" << r.projective_rotation
+              << " tried_projective_rotations=" << r.tried_projective_rotations
+              << "\n";
 
     if (include_lines && r.m_orig.size() == r.n && r.b_orig.size() == r.n) {
         print_lines_csv_block(r.m_orig, r.b_orig);
@@ -828,55 +866,101 @@ static void print_result(const AttemptResult& r, const std::string& format, bool
 }
 
 static AttemptResult solve_case(const std::vector<size_t>& gens, const Options& opt) {
-    OMatrix o = make_omatrix(gens);
-    if (o.n % 2 == 0) throw std::runtime_error("Only odd N supported (got even N)");
+    OMatrix base = make_omatrix(gens);
+    if (base.n % 2 == 0) throw std::runtime_error("Only odd N supported (got even N)");
+    if (opt.axis_k >= base.n) throw std::runtime_error("--axis out of range");
 
-    std::vector<AttemptResult> attempts;
-    if (opt.axis_set) {
-        if (opt.axis_k >= o.n) throw std::runtime_error("--hyperbolic-axis out of range");
+    auto solve_for_omatrix = [&](const OMatrix& o, int projective_rotation) {
+        std::vector<AttemptResult> attempts;
         attempts.push_back(run_attempt(o, gens, opt.axis_k, false, opt.eps, opt.margin, opt.tol, opt.m_order_delta, opt.solver_backend));
         if (opt.try_reflect) {
             attempts.push_back(run_attempt(o, gens, opt.axis_k, true, opt.eps, opt.margin, opt.tol, opt.m_order_delta, opt.solver_backend));
         }
-    } else {
-        for (size_t k = 0; k < o.n; ++k) {
-            attempts.push_back(run_attempt(o, gens, k, false, opt.eps, opt.margin, opt.tol, opt.m_order_delta, opt.solver_backend));
-            if (opt.try_reflect) {
-                attempts.push_back(run_attempt(o, gens, k, true, opt.eps, opt.margin, opt.tol, opt.m_order_delta, opt.solver_backend));
+
+        bool have_candidate = false;
+        AttemptResult best;
+        for (const auto& a : attempts) {
+            if (a.skipped_unrotatable) continue;
+            if (!have_candidate || better_attempt(a, best)) {
+                best = a;
+                have_candidate = true;
             }
         }
+
+        if (!have_candidate) {
+            AttemptResult no;
+            no.n = o.n;
+            no.gens_count = gens.size();
+            no.axis_input = opt.axis_k;
+            no.axis_used = no.axis_input;
+            no.rotation = 0;
+            no.reflected = false;
+            no.margin = opt.margin;
+            no.eps = opt.eps;
+            no.solver_backend = opt.solver_backend;
+            no.projective_rotation = projective_rotation;
+            no.feasible = false;
+            no.valid = false;
+            no.error = "SKIP_UNROTATABLE";
+            return no;
+        }
+
+        best.projective_rotation = projective_rotation;
+        if (best.feasible) {
+            apply_small_output_rotation(best);
+        }
+        return best;
+    };
+
+    auto solve_for_omatrix_with_euclidean = [&](const OMatrix& o, int projective_rotation) {
+        const int max_rotation = opt.euclidean_rotations ? 2 * (int)o.n : 1;
+        int tried_rotations = 0;
+        AttemptResult best;
+        bool have_best = false;
+        for (int rot = 0; rot < max_rotation; ++rot) {
+            OMatrix current;
+            if (!o.rotate(rot, current)) continue;
+            ++tried_rotations;
+            AttemptResult cur = solve_for_omatrix(current, projective_rotation);
+            cur.euclidean_rotation = rot;
+            if (!have_best || better_attempt(cur, best)) {
+                best = std::move(cur);
+                have_best = true;
+            }
+        }
+
+        if (!have_best) {
+            throw std::runtime_error("No valid Euclidean rotations available");
+        }
+        best.tried_euclidean_rotations = tried_rotations;
+        return best;
+    };
+
+    if (!opt.projective_rotations) {
+        AttemptResult single = solve_for_omatrix_with_euclidean(base, -1);
+        single.tried_projective_rotations = 1;
+        return single;
     }
 
-    bool have_candidate = false;
     AttemptResult best;
-    for (const auto& a : attempts) {
-        if (a.skipped_unrotatable) continue;
-        if (!have_candidate || better_attempt(a, best)) {
-            best = a;
-            have_candidate = true;
+    bool have_best = false;
+    int tried_projective_rotations = 0;
+    for (size_t p = 0; p < base.n; ++p) {
+        OMatrix current;
+        if (!base.projective_rotate(p, current)) continue;
+        ++tried_projective_rotations;
+
+        AttemptResult cur = solve_for_omatrix_with_euclidean(current, (int)p);
+        if (!have_best || better_attempt(cur, best)) {
+            best = std::move(cur);
+            have_best = true;
         }
     }
 
-    if (!have_candidate) {
-        AttemptResult no;
-        no.n = o.n;
-        no.gens_count = gens.size();
-        no.axis_input = opt.axis_set ? opt.axis_k : 0;
-        no.axis_used = no.axis_input;
-        no.rotation = 0;
-        no.reflected = false;
-        no.margin = opt.margin;
-        no.eps = opt.eps;
-        no.solver_backend = opt.solver_backend;
-        no.feasible = false;
-        no.valid = false;
-        no.error = "SKIP_UNROTATABLE";
-        return no;
+    if (!have_best) {
+        throw std::runtime_error("No valid projective rotations available");
     }
-
-    if (best.feasible) {
-        apply_small_output_rotation(best);
-    }
+    best.tried_projective_rotations = tried_projective_rotations;
     return best;
 }
 
@@ -902,22 +986,16 @@ int main(int argc, char** argv) {
                 opt.have_gens = true;
                 continue;
             }
-            if (arg == "--hyperbolic-axis") {
-                opt.axis_set = true;
-                if (i + 1 < argc) {
-                    std::string nxt = argv[i + 1];
-                    if (!nxt.empty() && nxt[0] != '-') {
-                        size_t pos = 0;
-                        unsigned long long v = std::stoull(nxt, &pos);
-                        if (pos != nxt.size()) throw std::runtime_error("Invalid value for --hyperbolic-axis");
-                        opt.axis_k = (size_t)v;
-                        ++i;
-                    } else {
-                        opt.axis_set = false;
-                    }
-                } else {
-                    opt.axis_set = false;
+            if (arg == "--axis" || arg == "-a") {
+                if (i + 1 >= argc) throw std::runtime_error("Missing value for --axis");
+                std::string nxt = argv[++i];
+                if (nxt.empty() || nxt[0] == '-') {
+                    throw std::runtime_error("Invalid value for --axis");
                 }
+                size_t pos = 0;
+                unsigned long long v = std::stoull(nxt, &pos);
+                if (pos != nxt.size()) throw std::runtime_error("Invalid value for --axis");
+                opt.axis_k = (size_t)v;
                 continue;
             }
             if (arg == "--axis-eps") {
@@ -932,6 +1010,23 @@ int main(int argc, char** argv) {
             }
             if (arg == "--try-reflect") {
                 opt.try_reflect = true;
+                continue;
+            }
+            if (arg == "--euclidean-rotations" || arg == "-e") {
+                opt.euclidean_rotations = true;
+                continue;
+            }
+            if (arg == "--projective-rotations" || arg == "-p") {
+                opt.projective_rotations = true;
+                opt.euclidean_rotations = true;
+                continue;
+            }
+            if (arg == "--print-sat-gens") {
+                opt.print_sat_gens = true;
+                continue;
+            }
+            if (arg == "--print-sat-lines") {
+                opt.print_sat_lines = true;
                 continue;
             }
             if (arg == "--output-format") {
@@ -976,21 +1071,58 @@ int main(int argc, char** argv) {
             for (const auto& gens : cases) {
                 if (gens.empty()) continue;
                 ++idx;
-                try {
-                    auto result = solve_case(gens, opt);
-                    bool include_lines = (!opt.metadata_only && opt.output_format == "full");
-                    print_result(result, opt.output_format, include_lines, idx);
-                } catch (const std::exception& e) {
-                    AttemptResult err;
-                    err.feasible = false;
-                    err.error = e.what();
-                    err.gens_count = gens.size();
-                    if (!gens.empty()) {
-                        err.n = *std::max_element(gens.begin(), gens.end()) + 2;
+                pid_t pid = fork();
+                if (pid < 0) {
+                    throw std::runtime_error("fork() failed in filter mode");
+                }
+
+                if (pid == 0) {
+                    int devnull = open("/dev/null", O_WRONLY);
+                    if (devnull >= 0) {
+                        (void)dup2(devnull, STDERR_FILENO);
+                        close(devnull);
                     }
-                    err.margin = opt.margin;
-                    err.eps = opt.eps;
-                    print_result(err, opt.output_format, false, idx);
+                    try {
+                        auto result = solve_case(gens, opt);
+                        std::cout << (result.feasible ? "SAT" : "NO_SOLUTION")
+                                  << " #" << idx
+                                  << " n=" << result.n
+                                  << " gens=" << result.gens_count
+                                  << " eucl_rot=" << result.euclidean_rotation << "/" << result.tried_euclidean_rotations
+                                  << " proj_rot=" << result.projective_rotation << "/" << result.tried_projective_rotations
+                                  << " margin=" << std::setprecision(21) << result.margin
+                                  << " t=" << result.t
+                                  << " worst_raw=" << result.worst_raw
+                                  << " solver=" << backend_kind_name(result.solver_backend);
+                        if (!result.error.empty()) std::cout << " error=" << result.error;
+                        std::cout << "\n";
+                        if (result.feasible && opt.print_sat_lines &&
+                            result.m_orig.size() == result.n && result.b_orig.size() == result.n) {
+                            std::cout << "#LINES_BEGIN #" << idx << "\n";
+                            std::cout << "m,b\n";
+                            for (size_t i = 0; i < result.n; ++i) {
+                                std::cout << result.m_orig[i] << "," << result.b_orig[i] << "\n";
+                            }
+                            std::cout << "#LINES_END #" << idx << "\n";
+                        }
+                        if (result.feasible && opt.print_sat_gens) {
+                            print_generators_line(gens, "GENS #" + std::to_string(idx));
+                        }
+                        std::cout.flush();
+                        _exit(0);
+                    } catch (const std::exception& e) {
+                        std::cout << "ERROR"
+                                  << " #" << idx
+                                  << " message=" << e.what()
+                                  << "\n";
+                        std::cout.flush();
+                        _exit(0);
+                    }
+                }
+
+                int status = 0;
+                if (waitpid(pid, &status, 0) < 0) {
+                    throw std::runtime_error("waitpid() failed in filter mode");
                 }
             }
             return 0;
