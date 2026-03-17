@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 
 // May vary
 #define n1 39

@@ -1,6 +1,6 @@
 /**
- * Программа осуществляет обход дерева для поиска бездефектных конфигураций.
- *
+ * Программа выполняет ограниченный обход дерева по заданному мультиплету.
+ * 
  * Применяется оптимизация для нечетного количества прямых, зафиксирована раскраска, начальные генераторы.
  * Черные области могут быть только треугольниками, так как черные генераторы применяются сразу после белых
  * и тем самым не перебираются.
@@ -11,11 +11,16 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <sys/time.h>
+#include <time.h>
 #include <signal.h>
+#include <limits.h>
 
 // May vary
-#define n1 47
+#define n1 49
 #define n_step1 (n1*(n1-1) / 2)
+
+#define plurality (n1-1)/2 // Количество узлов дерева на каждом уровне
+#define rearrangement_count 1 // Количество вариантов перестановок для обхода этих узлов
 
 // #define DEBUG 1
 
@@ -24,15 +29,155 @@ unsigned int level_limit = 0;
 
 typedef uint_fast32_t line_num;
 
+void print_multiplet(int triplets[][plurality]) {
+	printf("[");
+    // Выводим перемешанный массив
+    for (int i = 0; i <= (n-3)/2; i++) {
+        printf("%d, ", triplets[0][i]);
+    }
+	printf("]");
+}
+
+void move_in_multiplet(int multiplet[][plurality], int from, int to) {
+    int a = multiplet[0][from];
+
+    if (to > from) {
+        for (int i = from; i < to; i++) {
+            multiplet[0][i] = multiplet[0][i + 1];
+        }
+    }
+
+    if (to < from) {
+        for (int i = from; i > to; i--) {
+            multiplet[0][i] = multiplet[0][i-1];
+        }
+    }
+
+    multiplet[0][to] = a;
+}
+void init_multiplets(int triplets[][plurality]) {
+	int i;
+
+    // triplets[0][0] = -2;
+    // int index = 1;
+    
+    // // Сначала числа ≡ 2 (mod 4)
+    // for (int x = n - 3; x > 0; x -= 2) {
+    //     if (x % 4 == 2) {
+    //         triplets[0][index++] = x;
+    //     }
+    // }
+    
+    // // Затем числа ≡ 0 (mod 4)
+    // for (int x = n - 3; x > 0; x -= 2) {
+    //     if (x % 4 == 0) {
+    //         triplets[0][index++] = x;
+    //     }
+    // }
+    
+    // triplets[0][0] = -2;
+    // int index = 1;
+
+    // // Сначала ≡ 2 mod 4
+    // for (int x = 2; x <= n - 3; x += 2) {
+    //     if (x % 4 == 2) {
+    //         triplets[0][index++] = x;
+    //     }
+    // }
+
+    // // Затем ≡ 0 mod 4
+    // for (int x = 2; x <= n - 3; x += 2) {
+    //     if (x % 4 == 0) {
+    //         triplets[0][index++] = x;
+    //     }
+    // }
+
+
+	// -2, n-3, n-5 ...
+    // triplets[0][0] = -2;
+	// for (i = 1; i <= (n-3)/2; i++ ) {
+	// 	triplets[0][i] = n-1 - 2*i;
+	// }
+    // move_in_multiplet(triplets, 1, 2);
+    // move_in_multiplet(triplets, 2, 3);
+
+	// -2, +2, n-3, n-5 ...
+    // triplets[0][0] = -2;
+	// for (i = 1; i <= (n-3)/2; i++ ) {
+	// 	triplets[0][i] = n+1 - 2*i;
+	// }
+	// triplets[0][1] = 2;
+
+	// -2, 2, 4, ...
+    // не очень работает для 33 ??
+    // triplets[0][0] = -2;
+	// for (i = 1; i <= (n-3)/2; i++ ) {
+	//  	triplets[0][i] = 2*i;
+	// }
+
+
+    // псевдообертка 8
+    /// move_in_multiplet(triplets, 1, 2);
+
+    // move_in_multiplet(triplets, (n-3)/2-3, 1);
+    // move_in_multiplet(triplets, 4, 2);
+
+    // move_in_multiplet(triplets, 1, 2);
+    // move_in_multiplet(triplets, (n-3)/2-1, 1);
+    // move_in_multiplet(triplets, (n-3)/2-1, 3);
+
+
+	// shuffle(triplets[0], (n-1)/2);
+
+	// int ttt[] = {6, 16, 20, 22, 2, 4, -2, 14, 8, 10, 24, 12, 18, 26};
+	// int ttt[] = {-2, 20, 6, 12, 16, 14, 10, 22, 4, 8, 2, 24, 26, 18};
+	// int ttt[] = {-2, 20, 2, 12,  4, 6, 8, 10,  14, 16, 18,   22, 24, 26}; // 29
+	// int ttt[] = {-2, 24, 2, 20,  4, 6, 8, 10, 12, 14, 16, 18,   22,   26, 28, 30}; // 33
+
+	// int ttt[] = {-2, 26, 2, 18, 4, 6, 8, 10, 12, 14, 16, 20, 22, 24, 28, 30, 32}; // 35
+    // int ttt[] = {-2, 30, 2, 28, 4, 24, 20, 8, 14, 10, 12, 16, 18, 26, 22, 6 }; // 35
+
+	// int ttt[] = {-2, 30, 2, 22, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 26, 28, 32, 34, 36}; // 39
+
+    // int ttt[] = {-2, 40, 38, 20, 32, 28, 4, 2, 10, 14, 24, 22, 18, 8, 6, 12, 16, 26, 36, 34, 42, 30}; // 45
+	for (i = 0; i <= (n-3)/2; i++ ) {
+		triplets[0][i] = ttt[i];
+	}
+
+	printf("multiplet = ");
+    print_multiplet(triplets);
+	printf("\n");
+
+	// for (i = 0; i <= (n-3)/2; i++ ) {
+	// 	int shift = 2*i;
+	// 	if (shift == 0) {
+	// 		shift = -2;
+	// 	}
+	// 	int hasShift = 0;
+	// 	for (int j = 0; j <= (n-3)/2; j++) {
+	// 		if (shift == triplets[0][j]) {
+	// 			hasShift = 1;
+	// 			break;
+	// 		}
+	// 	}
+	// 	if (!hasShift) {
+	// 		printf("Shift=%d not found in multiplets.\n", shift);
+	// 		exit(0);
+	// 	}
+	// }
+
+}
+
+
 typedef struct {
     line_num generator;
+    int rearr_index;
 } Stat;
 
 Stat stat[n_step1 + 1];
 
-line_num a[n1]; // Текущая перестановка
+line_num a[n1]; // Текущая перестановка 
 
-unsigned int b_free; // Количество оставшихся генераторов для подбора
 int max_level = 0;
 
 // User input
@@ -72,7 +217,7 @@ void count_gen(unsigned long int iterations) {
      * белую область. С ним также ассоциированы два нечетных генератора, которые порождают
      * две черные области. Но с генератором 0 ассоциирован только один черный генератор.
      *
-     * Кроме того, есть начальные черные (n-1)/2 генераторов, которые порождают
+     * Кроме того, есть (n-1)/2 начальных черных генераторов, которые порождают
      * неучтенные черные области.
      *
      * Внешние области чередующегося цвета в количестве n + 1, которые пересекаются
@@ -121,8 +266,6 @@ void count_gen(unsigned long int iterations) {
 void set(unsigned int generator, unsigned int cross_direction) {
     line_num i;
 
-    // b_free += -2 * cross_direction + 1; // Корректируем кол-во оставшихся генераторов
-
     i = a[generator];
     a[generator] = a[generator + 1];
     a[generator + 1] = i;
@@ -165,97 +308,11 @@ void do_uncross_with_assoc(unsigned int generator) {
     a[generator] = i;
 }
 
-// // Стратегия перебора -2, +2, +4 ...
-
-// unsigned int inline should_process(line_num *cur_gen, line_num prev_gen) {
-
-//     if (*cur_gen == INT_FAST8_MAX) {
-//         // С помощью условия пропускаем значение -2.
-//         *cur_gen = (prev_gen > 0) ? prev_gen - 2 : prev_gen + 2;
-
-//         return 1;
-//     }
-
-//     *cur_gen += 2;
-//     if (*cur_gen == prev_gen) {
-//         *cur_gen += 2;
-//     }
-
-//     if (*cur_gen <= n - 3) {
-//         return 1;
-//     }
-
-//     return 0;
-// }
-
-// line_num inline init_working_gen() {
-//     return INT_FAST8_MAX;
-// }
-
-// line_num inline init_skip_gen(line_num curr_generator) {
-//     return n - 3; // todo
-// }
-
-// Стратегия перебора -2, n-3, n-5 ...
-unsigned int inline should_process(line_num* cur_gen, line_num prev_gen) {
-    // Пример: если предыдущий генератор 2, заканчивать надо на 4
-
-    if (*cur_gen == INT_FAST8_MAX) {
-        // С помощью условия пропускаем значение -2.
-        *cur_gen = (prev_gen > 0) ? prev_gen - 2 : n - 3;
-
-        return 1;
-    }
-
-    if (*cur_gen + 2 == prev_gen) {
-        if (n - 3 <= prev_gen) {
-            // Предотвращаем зацикливание. Когда prev_gen на максимуме и равен n-3, переключать на n-3 нельзя
-            return 0;
-        }
-        *cur_gen = n - 3;
-        return 1;
-    }
-
-    if (*cur_gen == prev_gen + 2) {
-        return 0;
-    }
-
-    *cur_gen -= 2;
-    return 1;
-}
-
-line_num inline init_working_gen() {
-    return INT_FAST8_MAX;
-}
-
-line_num inline init_skip_gen(line_num curr_generator) {
-    return curr_generator + 2;
-}
-
-// //Стратегия перебора от большего к меньшему
-// int inline should_process(int cur_gen, int prev_gen) {
-//     return cur_gen > prev_gen - 2 && cur_gen > 0 ;
-// }
-
-// void inline modify_generator(int* cur_gen, int prev_gen) {
-//     *cur_gen -= 2;
-//     if (*cur_gen == prev_gen) {
-//         *cur_gen -= 2;
-//     }
-// }
-
-// int inline init_working_gen(int generator) {
-//     return n - 1;
-// }
-
-// int inline init_skip_gen(int curr_generator) {
-//     return 0;
-// }
-
 // Calculations for defectless configurations
-void calc() {
+void calc(int triplets[][plurality]) {
     int level = level_limit - 1;
     unsigned long int iterations = 0;
+    unsigned int curr_generator;
     max_level = 0;
 
     // Оптимизация 0. Первые генераторы должны образовать (n-1)/2 внешних черных двуугольников.
@@ -263,43 +320,54 @@ void calc() {
         set(i * 2 + 1, 1);
     }
 
-    stat[level + 1].generator = 0; // Начальное значение для эвристики. TODO может меняться вместе с ней.
-    stat[level].generator = init_working_gen(); // завышенное несуществующее значение, будет уменьшаться
-
+    stat[level].rearr_index = -1;
+    stat[level + 1].generator = 0;
+    
     while (1) {
         iterations++; // Раскомментировать при добавлении новых условий оптимизации для "профилировки".
-#ifdef DEBUG
-        printf("-->> start lev = %d gen = %d\n", level, stat[level].generator);
+#ifdef DEBUG 
+		printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> %lu)  lev=%d ri=%d maxi=%d, cond=%d\n", iterations, level, stat[level].rearr_index, (n - 3)/2, stat[level].rearr_index < (int)(n - 3)/2);
+        // printf("-->> start lev = %d gen = %d\n", level, stat[level].generator);
 #endif
 
-        if (should_process(&stat[level].generator, stat[level + 1].generator)) {
+		if (stat[level].rearr_index < (int) (n - 3)/2) {
+			stat[level].rearr_index++;
+			curr_generator = stat[level + 1].generator + triplets[0/*stat[i].rearrangement*/][stat[level].rearr_index];
+#ifdef DEBUG 
+			printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> next, curr_generator = %d, prev_gen=%d, delta=%d\n", curr_generator, (int) stat[level + 1].generator , triplets[0][stat[level].rearr_index]);
+#endif
 
-            unsigned int curr_generator = stat[level].generator;
+			if (curr_generator > n-3 || curr_generator < 0) {
+				continue;
+			}
 
 #ifdef DEBUG
-            printf("test lev = %d gen = %d prev = %d b_free = %d\n", level, curr_generator, stat[level - 1].generator, b_free);
+            for (int j = 0; j < n; j++) {
+                printf("%d ", a[j]);
+            }
+            printf("\n");
 #endif
 
             /**
              * Оптимизации.
-             *
+             * 
              * 1. Генератор должен пересекать только прямые, которые еще не пересекались.
              * Прямые пересекались, если левая прямая имеет больший номер, чем правая.
-             *
+             * 
              * 2. Последние генераторы должны образовать (n-1)/2 внешних черных двуугольников.
              * Стороны двуугольников - прямые с убывающими номерами.
              * Эта оптимизация - продолжение фиксации начальных генераторов. Применима только для черных генераторов.
              * Например, прямые 0 и 1 могут пересекаться только последним генератором n - 2 в самом конце.
              * В середине их нельзя пересекать. Тут проверяем хотя бы совпадение генератора и прямых.
              * Можно проверить, что это именно последний генератор, но на практике это не дает заметного ускорения.
-             *
+             * 
              * 3. Черные генераторы исключаются из перебора.
              * Сразу после применения любого белого генератора применяются два соседних черных генератора
              * (для белого генератора 0 только один соседний правый генератор 1).
-             *
+             * 
              * 4. Генератор 0 применяется только один раз для первой и последней прямой.
              * Он образует оставшийся внешний черный двуугольник, образованный прямыми 0 и n-1.
-             *
+*
              * 5. Если прямая n-1 начала идти справа налево, остальные прямые пересекать смысла нет.
              * Соответствующие генераторы должны уменьшаться подряд и заканчиваться генератором 0.
              * Остальные генераторы применять в этом интервале не нужно. Для отслеживания начала движения
@@ -327,7 +395,7 @@ void calc() {
                 // Оптимизация 1.
                 // Как показывает профилировка, после остальных оптимизаций эта не дает ускорения
                 // if (a[curr_generator] > a[curr_generator + 1]) {
-                //     continue;
+                    //     continue;
                 // }
 
                 // Оптимизация 2.
@@ -359,45 +427,56 @@ void calc() {
             // if (a[0] != n-1 && a[n-2] != n-1 && a[curr_generator + 1] != n-1) {
             //     continue;
             // }
-
+            
             // Ограничение на поиск: максимальный генератор можно применить только два раза.
             // Слишком сильное, долгий перебор, но может пригодится в каких-нибудь эвристиках.
             // if (curr_generator == n - 3 && a[curr_generator + 1] != n-1 && a[curr_generator] != 0) {
             //     continue;
             // }
 
+
+			stat[level].generator = curr_generator;
+
+#ifdef DEBUG 
+            printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> down\n");
+#endif				
             // Применяем белый генератор curr_generator и ассоциированные соседние черные генераторы
             do_cross_with_assoc(curr_generator);
 
             level--;  // Уменьшается при продвижении вглубь
 
             if (level == -1) {
+#ifdef DEBUG 
+                printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> count_gen!!! >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+#endif				
                 count_gen(iterations);
 
-#ifdef DEBUG
-                printf("count-gen\n");
-#endif
                 goto up; // эквивалентно строке ниже, при изменении кода другой вариант может быть быстрее
-                // stat[level].generator = init_skip_gen(curr_generator); // перебора не будет, чтобы вернуться
             }
             else {
-                stat[level].generator = init_working_gen(); // запускаем перебор заново на другом уровне
+                // stat[level].rearrangement = 0;
+                stat[level].rearr_index = -1;
             }
         }
         else {
         up:
+#ifdef DEBUG 
+            printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> up\n");
+#endif				
+
             // Для корректной работы нужно это условие. Без него программа зациклится или вызовет seg fault.
             // Но его пропуск ускоряет программу. При этом она всё равно распечатает конфигурации.
             // Раскомментировать, например, при полном поиске.
-//            if (level == level_limit - 1) {
-//                printf("search finished\n");
-//                break;
-//            }
+            if (level == level_limit - 1) {
+                printf("search finished\n");
+                break;
+            }
 
             level++;
 
+			curr_generator = stat[level].generator;
             // Отменяем генераторы в обратном порядке, так как они не коммутируют
-            do_uncross_with_assoc(stat[level].generator);
+			do_uncross_with_assoc(curr_generator);
         }
     }
 }
@@ -441,7 +520,6 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    b_free = n * (n - 1) / 2;
     level_limit = (n * (n - 2) + 3) / 6;
 
     // Подготовка начальной перестановки
@@ -449,8 +527,12 @@ int main(int argc, char** argv) {
         a[i] = i;
     }
 
+    int triplets[rearrangement_count][plurality];
+
     gettimeofday(&start, NULL);
-    calc();
+
+    init_multiplets(triplets);
+    calc(triplets);
 
     struct timeval end;
 

@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Игра с призмами</title>
+    <style>
+        canvas {
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+<canvas id="gameCanvas" width="1000" height="1000"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const rays = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    const n = rays.length;
+    const rayColor = 'orange';
+    const cellSize = 50;
+    let prisms = [];
+
+    ctx.lineWidth = 2;
+
+    ctx.font = "16px sans-serif";
+
+
+    function drawPrism(x, y) {
+        // Полупрозрачный прямоугольник
+        ctx.fillStyle = 'rgba(200, 200, 255, 1)';  // Синий с прозрачностью 0.3
+        ctx.fillRect(x * cellSize, (y - 0.25) * cellSize, cellSize, 3.5 * cellSize);
+
+        // Восстановление непрозрачности для линий
+        // ctx.globalAlpha = 1.0;
+
+        // Рисование линий внутри прямоугольника
+        const lineY = y * cellSize;
+
+        if (y > 0) {
+            ctx.beginPath();
+            ctx.moveTo(x * cellSize, lineY);
+            ctx.lineTo(x * cellSize + cellSize / 2, lineY);
+            ctx.lineTo(x * cellSize + cellSize, lineY + cellSize);
+            ctx.strokeStyle = rayColor;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(x * cellSize, lineY + 2 * cellSize);
+            ctx.lineTo(x * cellSize + cellSize / 2, lineY + cellSize);
+            ctx.lineTo(x * cellSize + cellSize, lineY);
+            ctx.strokeStyle = rayColor;
+            ctx.stroke();
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(x * cellSize, lineY + 2 * cellSize);
+            ctx.lineTo(x * cellSize + cellSize / 2, lineY + cellSize);
+            ctx.lineTo(x * cellSize + cellSize, lineY + cellSize);
+            ctx.strokeStyle = rayColor;
+            ctx.stroke();
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(x * cellSize, lineY + cellSize);
+        ctx.lineTo(x * cellSize + cellSize / 2, lineY + 2 * cellSize);
+        ctx.lineTo(x * cellSize + cellSize, lineY + 3 * cellSize);
+        ctx.strokeStyle = rayColor;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x * cellSize, lineY + 3 * cellSize);
+        ctx.lineTo(x * cellSize + cellSize / 2, lineY + 3 * cellSize);
+        ctx.lineTo(x * cellSize + cellSize, lineY + 2 * cellSize);
+        ctx.strokeStyle = rayColor;
+        ctx.stroke();
+    }
+
+
+    // function swapRays(startIndex) {
+    //     const [a, b, c, d] = rays.slice(startIndex, startIndex + 4);
+    //     rays.splice(startIndex, 4, b, a, d, c);
+    // }
+
+    function checkWin() {
+        return JSON.stringify(rays) === JSON.stringify([5, 4, 3, 2, 1]);
+    }
+
+    function findPrism(x, y, delta) {
+        const prismArray = prisms[x] || [];
+        for (let i = 0; i < prismArray.length; i++) {
+            const prismY = prismArray[i];
+
+            if ((prismY <= y + delta && prismY >= y - delta)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    function drawFrame() {
+        ctx.clearRect(0, -cellSize / 2, canvas.width, canvas.height);
+
+        let permutation = Array(n).fill(0);
+        let stoppedLines = [];
+
+        for (let i = 0; i < n; i++) {
+            ctx.beginPath();
+            const yStart = i + 1;
+            permutation[i] = i === 0 ? i + 1 : (i % 2 ? i + 2 : i);
+            const yEnd = permutation[i];
+            ctx.moveTo((0 + 0.02) * cellSize, yStart * cellSize);
+            ctx.lineTo((0 + 0.5) * cellSize, yStart * cellSize);
+            ctx.lineTo((0 + 0.98) * cellSize, yEnd * cellSize);
+            ctx.strokeStyle = rayColor;
+            ctx.stroke();
+
+            ctx.fillStyle = 'black';
+            ctx.fillText(i + 1, 5, (i + 0.8) * cellSize);
+        }
+
+        console.log(permutation)
+        for (let i = 0; i < permutation.length; i++) {
+        }
+        console.log(permutation)
+
+        for (let x = 1; x < canvas.width / cellSize; x++) {
+            for (let i = 0; i < n; i++) {
+
+                if (prisms[x]) {
+                    if (prisms[x].includes(i)) {
+                        if (i === 0) {
+                            if (permutation[i + 1] < permutation[i]) {
+                                stoppedLines[permutation[i + 1]] = true;
+                                stoppedLines[permutation[i]] = true;
+                            }
+
+                            if (permutation[i + 2] < permutation[i]) {
+                                stoppedLines[permutation[i + 2]] = true;
+                                stoppedLines[permutation[i]] = true;
+                            }
+
+                            const val = permutation[i];
+                            permutation[i] = permutation[i + 1];
+                            permutation[i + 1] = permutation[i + 2];
+                            permutation[i + 2] = val;
+                        } else {
+                            if (permutation[i + 1] < permutation[i]) {
+                                console.log(i + 1, i, permutation[i + 1], permutation[i]);
+                                stoppedLines[permutation[i]] = true;
+                                stoppedLines[permutation[i + 1]] = true;
+                            }
+
+                            if (permutation[i + 2] < permutation[i]) {
+                                console.log(i + 2, i, permutation[i + 2], permutation[i]);
+                                stoppedLines[permutation[i]] = true;
+                                stoppedLines[permutation[i + 2]] = true;
+                            }
+
+                            if (permutation[i + 1] < permutation[i - 1]) {
+                                console.log(i + 1, i - 1, permutation[i + 1], permutation[i - 1]);
+                                stoppedLines[permutation[i - 1]] = true;
+                                stoppedLines[permutation[i + 1]] = true;
+                            }
+
+                            const val = permutation[i];
+                            permutation[i] = permutation[i - 1];
+                            permutation[i - 1] = permutation[i + 1];
+                            permutation[i + 1] = permutation[i + 2];
+                            permutation[i + 2] = val;
+                        }
+
+                        drawPrism(x, i);
+                        continue;
+                    }
+                    if (prisms[x].includes(i - 1) || prisms[x].includes(i + 1) || prisms[x].includes(i - 2)) {
+                        continue;
+                    }
+                }
+
+                if (stoppedLines[permutation[i]]) {
+                    continue;
+                }
+
+                ctx.beginPath();
+                ctx.moveTo((x + 0.02) * cellSize, (i + 1) * cellSize);
+                ctx.lineTo((x + 0.98) * cellSize, (i + 1) * cellSize);
+                ctx.strokeStyle = rayColor;
+                ctx.stroke();
+
+                ctx.fillStyle = 'black';
+                ctx.fillText(permutation[i], x * cellSize + 5, (i + 0.8) * cellSize);
+            }
+
+
+        }
+
+//        drawRays();
+    }
+
+    canvas.addEventListener('click', (event) => {
+        const {x, y} = getMouseCoords(event);
+
+        if (x === 0) {
+            return;
+        }
+
+        const indexToDelete = findPrism(x, y, 1);
+        if (indexToDelete !== -1) {
+            prisms[x].splice(indexToDelete, 1);
+            console.log('after deleting', prisms);
+            drawFrame();
+            return;
+        }
+
+        if (y % 2 === 1 || y > n - 3 || y < 0) {
+            return;
+        }
+
+        const indexPreventing = findPrism(x, y, 3);
+        if (indexPreventing !== -1) {
+            return;
+        }
+
+        if (typeof prisms[x] === 'undefined') {
+            prisms[x] = [];
+        }
+        prisms[x].push(y);
+        console.log('after adding', prisms);
+
+        // const rayIndex = Math.floor(y);
+        // if (rayIndex < rays.length - 3) {
+        //     swapRays(rayIndex);
+        // }
+        drawFrame();
+
+        // if (checkWin()) {
+        //     alert('Вы выиграли!');
+        // }
+    });
+
+    function getMouseCoords(event) {
+        const x = (event.offsetX - (event.offsetX % cellSize)) / cellSize;
+        const y = Math.floor(event.offsetY / cellSize - 1);
+        return {x, y};
+    }
+
+    canvas.addEventListener('mousemove', (event) => {
+        const {x, y} = getMouseCoords(event);
+
+        if (x === 0) {
+            canvas.style.cursor = 'default';
+            return;
+        }
+
+        const indexToDelete = findPrism(x, y, 1);
+        if (indexToDelete !== -1) {
+            canvas.style.cursor = 'not-allowed';
+            return;
+        }
+
+        if (y % 2 === 1 || y > n - 3 || y < 0) {
+            canvas.style.cursor = 'default';
+            return;
+        }
+        const indexPreventing = findPrism(x, y, 3);
+        if (indexPreventing !== -1) {
+            canvas.style.cursor = 'default';
+            return;
+        }
+
+        canvas.style.cursor = 'pointer';
+    });
+
+    drawFrame();
+</script>
+</body>
+</html>

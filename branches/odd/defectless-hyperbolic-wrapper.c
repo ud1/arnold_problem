@@ -1,5 +1,10 @@
 /**
  * Программа осуществляет обход дерева для поиска бездефектных конфигураций.
+ * 
+ * Цель - найти обертки по типу гиперболической.
+ * С помощью внешнего параметра wrapping можно задать часть генераторов, применяющихся перед началом перебора.
+ * Эти генераторы описывают некоторую дефолтную конфигурацию с кучей дефектов, из которой удалена крайняя прямая.
+ * Предполагается, что эта крайняя прямая заменяется на гиперболическую обертку без появления новых дефектов.
  *
  * Применяется оптимизация для нечетного количества прямых, зафиксирована раскраска, начальные генераторы.
  * Черные области могут быть только треугольниками, так как черные генераторы применяются сразу после белых
@@ -21,6 +26,7 @@
 
 unsigned int n;
 unsigned int level_limit = 0;
+unsigned int wrapping = 3;
 
 typedef uint_fast32_t line_num;
 
@@ -85,8 +91,18 @@ void count_gen(unsigned long int iterations) {
     printf(" [%fs] A=%d", time_taken, s);
     printf(" i=%e)", (double)iterations);
 
-    for (i = n / 2; i--; ) {
-        printf(" %d", i * 2 + 1);
+    // Инициализируем генераторы оборачиваемой конфигурации
+    for (int i = 1; i < wrapping - 2; i++) {
+        for (int j = i+1; j--; ) {
+            if (j == 0 && i % 2 == 0) {
+                continue;
+            }
+            printf(" %d ", j);
+        }
+    }
+
+    for (int i = wrapping - 2; i < n; i += 2) {
+        printf(" %d ", i);
     }
 
     for (i = level_limit; i--;) {
@@ -165,63 +181,27 @@ void do_uncross_with_assoc(unsigned int generator) {
     a[generator] = i;
 }
 
-// // Стратегия перебора -2, +2, +4 ...
+// Стратегия перебора -2, +2, +4 ...
 
-// unsigned int inline should_process(line_num *cur_gen, line_num prev_gen) {
-
-//     if (*cur_gen == INT_FAST8_MAX) {
-//         // С помощью условия пропускаем значение -2.
-//         *cur_gen = (prev_gen > 0) ? prev_gen - 2 : prev_gen + 2;
-
-//         return 1;
-//     }
-
-//     *cur_gen += 2;
-//     if (*cur_gen == prev_gen) {
-//         *cur_gen += 2;
-//     }
-
-//     if (*cur_gen <= n - 3) {
-//         return 1;
-//     }
-
-//     return 0;
-// }
-
-// line_num inline init_working_gen() {
-//     return INT_FAST8_MAX;
-// }
-
-// line_num inline init_skip_gen(line_num curr_generator) {
-//     return n - 3; // todo
-// }
-
-// Стратегия перебора -2, n-3, n-5 ...
-unsigned int inline should_process(line_num* cur_gen, line_num prev_gen) {
-    // Пример: если предыдущий генератор 2, заканчивать надо на 4
+unsigned int inline should_process(line_num *cur_gen, line_num prev_gen) {
 
     if (*cur_gen == INT_FAST8_MAX) {
         // С помощью условия пропускаем значение -2.
-        *cur_gen = (prev_gen > 0) ? prev_gen - 2 : n - 3;
+        *cur_gen = (prev_gen > 0) ? prev_gen - 2 : prev_gen + 2;
 
         return 1;
     }
 
-    if (*cur_gen + 2 == prev_gen) {
-        if (n - 3 <= prev_gen) {
-            // Предотвращаем зацикливание. Когда prev_gen на максимуме и равен n-3, переключать на n-3 нельзя
-            return 0;
-        }
-        *cur_gen = n - 3;
+    *cur_gen += 2;
+    if (*cur_gen == prev_gen) {
+        *cur_gen += 2;
+    }
+
+    if (*cur_gen <= n - 3) {
         return 1;
     }
 
-    if (*cur_gen == prev_gen + 2) {
-        return 0;
-    }
-
-    *cur_gen -= 2;
-    return 1;
+    return 0;
 }
 
 line_num inline init_working_gen() {
@@ -229,8 +209,44 @@ line_num inline init_working_gen() {
 }
 
 line_num inline init_skip_gen(line_num curr_generator) {
-    return curr_generator + 2;
+    return n - 3; // todo
 }
+
+// Стратегия перебора -2, n-3, n-5 ...
+// unsigned int inline should_process(line_num* cur_gen, line_num prev_gen) {
+//     // Пример: если предыдущий генератор 2, заканчивать надо на 4
+
+//     if (*cur_gen == INT_FAST8_MAX) {
+//         // С помощью условия пропускаем значение -2.
+//         *cur_gen = (prev_gen > 0) ? prev_gen - 2 : n - 3;
+
+//         return 1;
+//     }
+
+//     if (*cur_gen + 2 == prev_gen) {
+//         if (n - 3 <= prev_gen) {
+//             // Предотвращаем зацикливание. Когда prev_gen на максимуме и равен n-3, переключать на n-3 нельзя
+//             return 0;
+//         }
+//         *cur_gen = n - 3;
+//         return 1;
+//     }
+
+//     if (*cur_gen == prev_gen + 2) {
+//         return 0;
+//     }
+
+//     *cur_gen -= 2;
+//     return 1;
+// }
+
+// line_num inline init_working_gen() {
+//     return INT_FAST8_MAX;
+// }
+
+// line_num inline init_skip_gen(line_num curr_generator) {
+//     return curr_generator + 2;
+// }
 
 // //Стратегия перебора от большего к меньшему
 // int inline should_process(int cur_gen, int prev_gen) {
@@ -258,18 +274,40 @@ void calc() {
     unsigned long int iterations = 0;
     max_level = 0;
 
-    // Оптимизация 0. Первые генераторы должны образовать (n-1)/2 внешних черных двуугольников.
-    for (int i = n / 2; i--; ) {
-        set(i * 2 + 1, 1);
+    // Инициализируем генераторы оборачиваемой конфигурации
+    for (int i = 1; i < wrapping - 2; i++) {
+        for (int j = i+1; j--; ) {
+            if (j == 0 && i % 2 == 0) {
+                continue;
+            }
+            set(j, 1);
+            printf(" %d ", j);
+            if (j % 2 == 0) {
+            //     stat[level].generator = j;
+            }
+        }
+         printf("\n");
     }
 
-    stat[level + 1].generator = 0; // Начальное значение для эвристики. TODO может меняться вместе с ней.
+    for (int i = wrapping - 2; i < n; i += 2) {
+        set(i, 1);
+        printf(" %d ", i);
+    }
+         printf("\n");
+ // exit(0);
+
+
+    // Оптимизация 0. Первые генераторы должны образовать (n-1)/2 внешних черных двуугольников.
+    // for (int i = n / 2; i--; ) {
+    //     set(i * 2 + 1, 1);
+    // }
+    stat[level + 1].generator = wrapping + 1; // Начальное значение для эвристики. TODO может меняться вместе с ней.
     stat[level].generator = init_working_gen(); // завышенное несуществующее значение, будет уменьшаться
 
     while (1) {
         iterations++; // Раскомментировать при добавлении новых условий оптимизации для "профилировки".
 #ifdef DEBUG
-        printf("-->> start lev = %d gen = %d\n", level, stat[level].generator);
+        printf("-->> start lev = %d gen = %ld\n", level, stat[level].generator);
 #endif
 
         if (should_process(&stat[level].generator, stat[level + 1].generator)) {
@@ -277,7 +315,7 @@ void calc() {
             unsigned int curr_generator = stat[level].generator;
 
 #ifdef DEBUG
-            printf("test lev = %d gen = %d prev = %d b_free = %d\n", level, curr_generator, stat[level - 1].generator, b_free);
+            printf("test lev = %d gen = %d prev = %ld b_free = %d\n", level, curr_generator, stat[level - 1].generator, b_free);
 #endif
 
             /**
@@ -320,7 +358,7 @@ void calc() {
                 }
 
                 // Оптимизация 2.
-                if (a[curr_generator] + 1 == a[curr_generator + 2] && curr_generator + 1 + a[curr_generator + 2] != n - 1) {
+                if (a[curr_generator] + 1 == a[curr_generator + 2] && curr_generator + 1 + a[curr_generator + 2] != n - 1 && a[curr_generator + 2] >= wrapping) {
                     continue;
                 }
 
@@ -331,34 +369,41 @@ void calc() {
                 // }
 
                 // Оптимизация 2.
-                if (a[curr_generator - 1] + 1 == a[curr_generator + 1] && curr_generator - 1 + a[curr_generator + 1] != n - 1) {
+                if (a[curr_generator - 1] + 1 == a[curr_generator + 1] && curr_generator - 1 + a[curr_generator + 1] != n - 1 /*&& a[curr_generator + 1] >= wrapping*/) {
                     continue;
                 }
 
                 // Оптимизация 2. Закомментировано, потому что профилировка показывает, что количество итераций слегка сокращается, а время выполнения увеличивается.
-                // if (a[curr_generator - 1] - 1 == a[curr_generator] && a[curr_generator] + curr_generator == n-1) {
-                //     continue;
-                // }
-                // if (a[curr_generator + 1] - 1 == a[curr_generator + 2] && a[curr_generator + 1] - 1 + curr_generator == n-1) {
-                //     continue;
-                // }
+                if (a[curr_generator - 1] - 1 == a[curr_generator] && a[curr_generator] + curr_generator == n-1) {
+                    continue;
+                }
+                if (a[curr_generator + 1] - 1 == a[curr_generator + 2] && a[curr_generator + 1] - 1 + curr_generator == n-1) {
+                    continue;
+                }
             }
             else {
                 // Оптимизация 4.
                 if (a[curr_generator + 1] != n - 1) {
                     continue;
                 }
-                if (a[curr_generator] != 0) {
-                    continue;
-                }
+                // if (a[curr_generator] != wrapping - 3) {
+                //     continue;
+                // }
+
+                // Часть оптимизации 1, если выше закомментировано
+                // if (a[curr_generator] > a[curr_generator + 2]) {
+                //     continue;
+                // }
+
+
                 // Здесь нет смысла проверять оптимизацию 2, так как прямая с номером 1 уже пересекла прямую n-1 и прямую 2.
                 // Поэтому a[2] != 1, и пересечение a[1] == 0 и a[2] всегда возможно.
             }
 
             // // Оптимизация 5. Закомментирована, так как не дает прироста в эвристике -2, n-3, n-5...
-            // if (a[0] != n-1 && a[n-2] != n-1 && a[curr_generator + 1] != n-1) {
-            //     continue;
-            // }
+            if (a[0] != n-1 && a[n-2] != n-1 && a[curr_generator + 1] != n-1) {
+                continue;
+            }
 
             // Ограничение на поиск: максимальный генератор можно применить только два раза.
             // Слишком сильное, долгий перебор, но может пригодится в каких-нибудь эвристиках.
@@ -389,10 +434,10 @@ void calc() {
             // Для корректной работы нужно это условие. Без него программа зациклится или вызовет seg fault.
             // Но его пропуск ускоряет программу. При этом она всё равно распечатает конфигурации.
             // Раскомментировать, например, при полном поиске.
-//            if (level == level_limit - 1) {
-//                printf("search finished\n");
-//                break;
-//            }
+           if (level == level_limit - 1) {
+               printf("search finished\n");
+               break;
+           }
 
             level++;
 
@@ -418,6 +463,8 @@ int main(int argc, char** argv) {
         strcpy(s, argv[i]);
         if (0 == strcmp("-n", s))
             sscanf(argv[++i], "%d", &n);
+        else if (0 == strcmp("-w", s))
+            sscanf(argv[++i], "%d", &wrapping);
         else if (0 == strcmp("-o", s))
             strcpy(filename, argv[++i]);
         else if (0 == strcmp("-full", s))
@@ -442,7 +489,7 @@ int main(int argc, char** argv) {
     }
 
     b_free = n * (n - 1) / 2;
-    level_limit = (n * (n - 2) + 3) / 6;
+    level_limit = (n * (n - 2) + 3) / 6 - (wrapping * (wrapping - 2) + 3) / 6 + (wrapping - 1) / 2;
 
     // Подготовка начальной перестановки
     for (i = 0; i < n; i++) {

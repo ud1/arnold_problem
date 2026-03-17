@@ -12,6 +12,8 @@
 #include <stdint.h>
 #include <sys/time.h>
 #include <signal.h>
+#include <malloc.h>
+#include "hash_table.h"
 
 // May vary
 #define n1 47
@@ -22,7 +24,7 @@
 unsigned int n;
 unsigned int level_limit = 0;
 
-typedef uint_fast32_t line_num;
+// typedef uint_fast32_t line_num;
 
 typedef struct {
     line_num generator;
@@ -31,6 +33,8 @@ typedef struct {
 Stat stat[n_step1 + 1];
 
 line_num a[n1]; // Текущая перестановка
+
+HashTable *table;
 
 unsigned int b_free; // Количество оставшихся генераторов для подбора
 int max_level = 0;
@@ -50,10 +54,12 @@ void handle_signal(int sig) {
 
     printf("\n [%fs] bye\n", time_taken);
 
+    hash_table_print_stats(table);
+
     exit(0);
 }
 
-void count_gen(unsigned long int iterations) {
+void count_gen(unsigned long int iterations, unsigned long int hashed) {
 
     if (level_limit < max_level || !full && level_limit == max_level) {
         return;
@@ -83,7 +89,7 @@ void count_gen(unsigned long int iterations) {
     int s = level_limit - 1 + (n - 1) / 2;
 
     printf(" [%fs] A=%d", time_taken, s);
-    printf(" i=%e)", (double)iterations);
+    printf("\t%lu\t%lu)", iterations, hashed);
 
     for (i = n / 2; i--; ) {
         printf(" %d", i * 2 + 1);
@@ -100,6 +106,12 @@ void count_gen(unsigned long int iterations) {
             printf(" %d %d", (int)stat[i].generator - 1, (int)stat[i].generator + 1);
         }
     }
+
+    printf("\n");
+
+    malloc_stats();
+    printf("\n");
+    hash_table_print_stats(table);
 
     printf("\n");
 
@@ -256,6 +268,7 @@ line_num inline init_skip_gen(line_num curr_generator) {
 void calc() {
     int level = level_limit - 1;
     unsigned long int iterations = 0;
+    unsigned long int h = 0;
     max_level = 0;
 
     // Оптимизация 0. Первые генераторы должны образовать (n-1)/2 внешних черных двуугольников.
@@ -369,10 +382,35 @@ void calc() {
             // Применяем белый генератор curr_generator и ассоциированные соседние черные генераторы
             do_cross_with_assoc(curr_generator);
 
-            level--;  // Уменьшается при продвижении вглубь
+            if (hash_table_contains(table, a, n)) {
+                // printf("level = %d\n", level);
+                // for (int r = 0; r < n; r++) {
+                //     printf(" %d", a[r]);
+                // }
+                // printf("\n");
+
+                // for (int r = level_limit-1; r >= level; r--) {
+                //     // Белый генератор
+                //     printf(" %d", (int)stat[r].generator);
+                //     // Ассоциированные черные генераторы
+                //     if (stat[r].generator == 0) {
+                //         printf(" 1");
+                //     }
+                //     else if (stat[r].generator % 2 == 0) {
+                //         printf(" %d %d", (int)stat[r].generator - 1, (int)stat[r].generator + 1);
+                //     }
+                // }
+                // printf("\n");
+
+
+                do_uncross_with_assoc(curr_generator);
+                continue;
+            }
+
+            level--;
 
             if (level == -1) {
-                count_gen(iterations);
+                count_gen(iterations, h);
 
 #ifdef DEBUG
                 printf("count-gen\n");
@@ -389,9 +427,14 @@ void calc() {
             // Для корректной работы нужно это условие. Без него программа зациклится или вызовет seg fault.
             // Но его пропуск ускоряет программу. При этом она всё равно распечатает конфигурации.
             // Раскомментировать, например, при полном поиске.
-//            if (level == level_limit - 1) {
-//                printf("search finished\n");
-//                break;
+            if (level == level_limit - 1) {
+                printf("search finished\n");
+                break;
+            }
+
+//            if (1.0 * level / level_limit < 0.9) {
+                hash_table_insert(table, a, n);
+                h++;
 //            }
 
             level++;
@@ -405,6 +448,13 @@ void calc() {
 int main(int argc, char** argv) {
     int i;
     char s[80];
+
+    // 53, 97, 193, 769, 1543, 3079, 6151, 12289, 24593, 49157, 98317, 196613, 393241, 786433, 1572869, 3145739, 6291469, 12582917, 25165843, 50331653, 100663319, 201326611, 402653189, 805306457, 1610612741
+    size_t bucket_count = 50331653;
+    // size_t bucket_count = 100663319;
+    // size_t bucket_count = 201326611;
+
+    table = hash_table_create(bucket_count);
 
     if (argc <= 1) {
         printf("Usage: %s -n N [-o filename] [-full]\n  -n\n	 line count;\n  -o\n	 output file.\n", argv[0]);
@@ -428,6 +478,25 @@ int main(int argc, char** argv) {
             return 0;
         }
     }
+/*
+    line_num ddd[n1] = { 20, 19, 18, 17, 16, 12, 10, 14, 8, 6, 4, 5, 2, 15, 3, 13, 9, 11, 7, 1, 0};
+    line_num ttt[n1] = { 20, 19, 18, 17, 16, 12, 10, 14, 8, 6, 4, 5, 2, 15, 3, 13, 9, 11, 7, 0, 1};
+
+    if (hash_table_contains(table, ddd, n)) {
+        printf("Found!\n");
+    } else {
+        printf("Not found \n");
+    }
+
+    hash_table_insert(table, ddd, n);
+
+    if (hash_table_contains(table, ttt, n)) {
+        printf("Found!\n");
+    } else {
+        printf("Not found \n");
+    }
+
+return 0;*/
 
     if (n % 2 == 0) {
         printf("This program is designed for fast search of odd defectless configurations only.\n");
