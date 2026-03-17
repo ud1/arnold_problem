@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cmath>
-#include <cctype>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -15,183 +14,11 @@
 #include <utility>
 #include <vector>
 
-#include "common/projective_rotation.h"
+#include "common/input_parsing.h"
+#include "common/omatrix.h"
 #include "common/solver_backend.h"
 #include "solver/custom_phase1_solver.h"
 #include "solver/highs_phase1_solver.h"
-
-struct OMatrix {
-    std::vector<std::vector<size_t>> intersections;
-    std::vector<int> parallels;
-    size_t n = 0;
-    size_t num_vertices = 0;
-
-    int norm(int value) const {
-        const int nn = (int)n;
-        return (value + 2 * nn) % nn;
-    }
-
-    int norm2(int value) const {
-        const int nn = (int)n;
-        return (value + 4 * nn) % (2 * nn);
-    }
-
-    bool can_rotate(int rotation) const {
-        if (rotation < 0 || rotation >= 2 * (int)n) {
-            return false;
-        }
-        int rotated = norm(rotation);
-        int p = parallels[rotated] >= 0 ? parallels[rotated] : rotated;
-        return p >= rotated;
-    }
-
-    int rotate_line_num(int rotation, int line) const {
-        if (line >= rotation) return line - rotation;
-        return norm(line - rotation);
-    }
-
-    int get_line_len(int rotation, int i) const {
-        int line = i + rotation;
-        if (line < (int)n) {
-            return (int)intersections[(size_t)line].size();
-        }
-        line = norm(line);
-        if (parallels[(size_t)line] >= 0) {
-            line = parallels[(size_t)line];
-        }
-        return (int)intersections[(size_t)line].size();
-    }
-
-    int get_val(int rotation, int i, int j) const {
-        int line = norm2(i + rotation);
-        int v = -1;
-        if (line < (int)n) {
-            v = (int)intersections[(size_t)line][(size_t)j];
-        } else {
-            line = norm(line);
-            if (parallels[(size_t)line] >= 0) {
-                line = parallels[(size_t)line];
-            }
-            const auto& row = intersections[(size_t)line];
-            v = (int)row[row.size() - 1 - (size_t)j];
-        }
-
-        if ((rotation < (int)n && v >= rotation) ||
-            (rotation >= (int)n && v < norm(rotation))) {
-            return norm(v - rotation);
-        }
-
-        if (parallels[(size_t)v] >= 0) {
-            v = parallels[(size_t)v];
-        }
-        return norm(v - rotation);
-    }
-
-    bool rotate(int rotation, OMatrix& out) const {
-        if (n == 0) return false;
-        int rot = rotation % (2 * (int)n);
-        if (rot < 0) rot += 2 * (int)n;
-        if (rot == 0) {
-            out = *this;
-            return true;
-        }
-        if (!can_rotate(rot)) return false;
-
-        OMatrix r;
-        r.n = n;
-        r.num_vertices = num_vertices;
-        r.intersections.assign(n, {});
-        r.parallels.assign(n, -1);
-
-        for (size_t i = 0; i < n; ++i) {
-            int len = get_line_len(rot, (int)i);
-            r.intersections[i].reserve((size_t)len);
-            for (int j = 0; j < len; ++j) {
-                r.intersections[i].push_back((size_t)get_val(rot, (int)i, j));
-            }
-        }
-
-        for (size_t k = 0; k < n; ++k) {
-            int v = parallels[k];
-            if (v < 0) continue;
-            int nk = rotate_line_num(rot, (int)k);
-            int nv = rotate_line_num(rot, v);
-            r.parallels[(size_t)nk] = nv;
-        }
-
-        out = std::move(r);
-        return true;
-    }
-
-    OMatrix reflect() const {
-        OMatrix r;
-        r.n = n;
-        r.num_vertices = num_vertices;
-        r.intersections.assign(n, {});
-        r.parallels.assign(n, -1);
-
-        for (size_t old = 0; old < n; ++old) {
-            size_t ni = n - 1 - old;
-            const auto& row = intersections[old];
-            auto& out_row = r.intersections[ni];
-            out_row.reserve(row.size());
-            for (size_t v : row) out_row.push_back(n - 1 - v);
-        }
-
-        for (size_t k = 0; k < n; ++k) {
-            if (parallels[k] < 0) continue;
-            int nk = (int)(n - 1 - k);
-            int nv = (int)(n - 1 - (size_t)parallels[k]);
-            r.parallels[(size_t)nk] = nv;
-        }
-
-        return r;
-    }
-
-    bool has_parallels() const {
-        return has_parallels_raw(parallels);
-    }
-
-    bool projective_rotate(size_t val, OMatrix& out) const {
-        OMatrix r;
-        r.n = n;
-        r.num_vertices = num_vertices;
-        if (!projective_rotate_raw(intersections, parallels, n, val, r.intersections, r.parallels)) {
-            return false;
-        }
-        out = std::move(r);
-        return true;
-    }
-};
-
-static OMatrix make_omatrix(const std::vector<size_t>& gens) {
-    if (gens.empty()) throw std::runtime_error("Empty generator list");
-
-    const size_t n = *std::max_element(gens.begin(), gens.end()) + 2;
-    std::vector<size_t> lines(n);
-    std::iota(lines.begin(), lines.end(), 0);
-
-    std::vector<std::vector<size_t>> intersections(n);
-    for (size_t gen : gens) {
-        if (gen + 1 >= n) throw std::runtime_error("Generator index out of range");
-        size_t first = lines[gen];
-        size_t second = lines[gen + 1];
-        intersections[first].push_back(second);
-        intersections[second].push_back(first);
-        lines[gen] = second;
-        lines[gen + 1] = first;
-    }
-
-    std::vector<int> parallels(n, -1);
-    for (size_t i = 0; i + 1 < n; ++i) {
-        if (lines[i] < lines[i + 1]) {
-            parallels[lines[i]] = (int)lines[i + 1];
-            parallels[lines[i + 1]] = (int)lines[i];
-        }
-    }
-
-    return OMatrix{intersections, parallels, n, gens.size()};
-}
 
 struct EdgeSpec {
     size_t b1, b2, m1, m2, b3, b4, m3, m4;
@@ -405,99 +232,6 @@ static std::vector<long double> build_hyperbolic_b(
     return b;
 }
 
-static std::vector<size_t> parse_gens_numbers(const std::string& s) {
-    std::vector<size_t> out;
-    std::stringstream ss(s);
-    size_t val = 0;
-    while (ss >> val) out.push_back(val);
-    return out;
-}
-
-static std::string trim_copy(const std::string& s) {
-    size_t l = 0;
-    while (l < s.size() && std::isspace((unsigned char)s[l])) ++l;
-    size_t r = s.size();
-    while (r > l && std::isspace((unsigned char)s[r - 1])) --r;
-    return s.substr(l, r - l);
-}
-
-static bool is_numbers_only_line(const std::string& s) {
-    bool has_digit = false;
-    for (char c : s) {
-        if (std::isdigit((unsigned char)c)) {
-            has_digit = true;
-            continue;
-        }
-        if (!std::isspace((unsigned char)c)) return false;
-    }
-    return has_digit;
-}
-
-static std::vector<size_t> extract_nonnegative_ints(const std::string& s) {
-    std::vector<size_t> out;
-    unsigned long long cur = 0;
-    bool in_num = false;
-    for (char c : s) {
-        if (std::isdigit((unsigned char)c)) {
-            in_num = true;
-            cur = cur * 10ULL + (unsigned long long)(c - '0');
-        } else if (in_num) {
-            out.push_back((size_t)cur);
-            cur = 0;
-            in_num = false;
-        }
-    }
-    if (in_num) out.push_back((size_t)cur);
-    return out;
-}
-
-static std::vector<std::vector<size_t>> parse_filter_cases_from_stream(std::istream& in) {
-    std::vector<std::vector<size_t>> cases;
-    std::vector<size_t> current;
-    bool header_case_active = false;
-    std::string line;
-
-    while (std::getline(in, line)) {
-        size_t close_paren_pos = line.find(')');
-        if (close_paren_pos != std::string::npos) {
-            if (!current.empty()) {
-                cases.push_back(current);
-                current.clear();
-            }
-            header_case_active = true;
-            std::string tail = line.substr(close_paren_pos + 1);
-            auto nums = extract_nonnegative_ints(tail);
-            current.insert(current.end(), nums.begin(), nums.end());
-            continue;
-        }
-
-        if (header_case_active) {
-            auto nums = extract_nonnegative_ints(line);
-            current.insert(current.end(), nums.begin(), nums.end());
-            continue;
-        }
-
-        std::string trimmed = trim_copy(line);
-        if (trimmed.empty()) continue;
-        if (is_numbers_only_line(trimmed)) {
-            auto nums = extract_nonnegative_ints(trimmed);
-            if (!nums.empty()) cases.push_back(std::move(nums));
-        }
-    }
-
-    if (!current.empty()) cases.push_back(current);
-    return cases;
-}
-
-static bool read_file(const std::string& path, std::string& out) {
-    std::ifstream in(path);
-    if (!in) return false;
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    out = ss.str();
-    return true;
-}
-
 struct Options {
     std::string gens_str;
     bool have_gens = false;
@@ -569,6 +303,7 @@ struct AttemptResult {
     std::string error;
     std::vector<long double> m_orig;
     std::vector<long double> b_orig;
+    std::vector<size_t> omatrix_gens;
 };
 
 static std::vector<size_t> build_new_to_original_map(size_t n, bool reflected, int rotation) {
@@ -584,60 +319,36 @@ static std::vector<size_t> build_new_to_original_map(size_t n, bool reflected, i
 
 static bool better_attempt(const AttemptResult& a, const AttemptResult& b);
 
-static void apply_small_output_rotation(AttemptResult& res) {
-    if (res.n == 0 || res.axis_input >= res.n) return;
-    if (res.m_orig.size() != res.n || res.b_orig.size() != res.n) return;
+static bool build_output_lines_swapped_xy(
+    const AttemptResult& res,
+    std::vector<long double>& m_out,
+    std::vector<long double>& b_out
+) {
+    if (res.n == 0 || res.axis_input >= res.n) return false;
+    if (res.m_orig.size() != res.n || res.b_orig.size() != res.n) return false;
 
-    long double max_abs_m = 0.0L;
+    m_out.assign(res.n, 0.0L);
+    b_out.assign(res.n, 0.0L);
+
     for (size_t i = 0; i < res.n; ++i) {
-        if (i == res.axis_input) continue;
-        max_abs_m = std::max(max_abs_m, fabsl(res.m_orig[i]));
-    }
-
-    long double phi = std::min(1e-6L, 1e-3L / std::max(1.0L, max_abs_m));
-    const long double min_denom = 1e-8L;
-
-    for (int iter = 0; iter < 40; ++iter) {
-        long double c = cosl(phi);
-        long double s = sinl(phi);
-        long double best = std::numeric_limits<long double>::infinity();
-        for (size_t i = 0; i < res.n; ++i) {
-            if (i == res.axis_input) continue;
-            long double d = c - res.m_orig[i] * s;
-            best = std::min(best, fabsl(d));
+        if (i == res.axis_input) {
+            // Axis x=0 becomes y=0 after x <-> y.
+            m_out[i] = 0.0L;
+            b_out[i] = 0.0L;
+            continue;
         }
-        if (best >= min_denom) break;
-        phi *= 0.5L;
-    }
 
-    long double c = cosl(phi);
-    long double s = sinl(phi);
-    if (fabsl(s) < 1e-18L) {
-        phi = 1e-12L;
-        c = cosl(phi);
-        s = sinl(phi);
-    }
-
-    std::vector<long double> m_new = res.m_orig;
-    std::vector<long double> b_new = res.b_orig;
-
-    for (size_t i = 0; i < res.n; ++i) {
-        if (i == res.axis_input) continue;
         const long double m = res.m_orig[i];
         const long double b = res.b_orig[i];
-        const long double d = c - m * s;
-        if (!std::isfinite((double)d) || fabsl(d) < 1e-18L) continue;
-        m_new[i] = (m * c + s) / d;
-        b_new[i] = b / d;
+        if (!std::isfinite((double)m) || fabsl(m) < 1e-18L) {
+            return false;
+        }
+
+        m_out[i] = 1.0L / m;
+        b_out[i] = -b / m;
     }
 
-    // Axis x=0 rotated by phi: y = -cot(phi) * x.
-    m_new[res.axis_input] = -c / s;
-    b_new[res.axis_input] = 0.0L;
-
-    res.m_orig = std::move(m_new);
-    res.b_orig = std::move(b_new);
-    res.output_rotation_phi = phi;
+    return true;
 }
 
 static AttemptResult run_attempt(
@@ -659,6 +370,7 @@ static AttemptResult run_attempt(
     res.gens_count = gens.size();
     res.margin = margin;
     res.eps = eps;
+    res.omatrix_gens = omatrix_to_generators(original);
 
     OMatrix base = reflected ? original.reflect() : original;
 
@@ -781,6 +493,9 @@ static void print_generators_line(const std::vector<size_t>& gens, const std::st
 
 static void print_result(const AttemptResult& r, const std::string& format, bool include_lines, size_t case_idx = 0) {
     const char* status = r.feasible ? "SAT" : "NO_SOLUTION";
+    std::vector<long double> output_m;
+    std::vector<long double> output_b;
+    const bool have_output_lines = r.feasible && include_lines && build_output_lines_swapped_xy(r, output_m, output_b);
 
     if (format == "json") {
         std::cout << "{";
@@ -803,11 +518,11 @@ static void print_result(const AttemptResult& r, const std::string& format, bool
                   << ",\"worst_raw\":" << r.worst_raw
                   << ",\"solver\":\"" << backend_kind_name(r.solver_backend) << "\"";
         if (!r.error.empty()) std::cout << ",\"error\":\"" << r.error << "\"";
-        if (include_lines && r.m_orig.size() == r.n && r.b_orig.size() == r.n) {
+        if (have_output_lines) {
             std::cout << ",\"lines\":[";
             for (size_t i = 0; i < r.n; ++i) {
                 if (i) std::cout << ",";
-                std::cout << "[" << r.m_orig[i] << "," << r.b_orig[i] << "]";
+                std::cout << "[" << output_m[i] << "," << output_b[i] << "]";
             }
             std::cout << "]";
         }
@@ -860,8 +575,8 @@ static void print_result(const AttemptResult& r, const std::string& format, bool
               << " tried_projective_rotations=" << r.tried_projective_rotations
               << "\n";
 
-    if (include_lines && r.m_orig.size() == r.n && r.b_orig.size() == r.n) {
-        print_lines_csv_block(r.m_orig, r.b_orig);
+    if (have_output_lines) {
+        print_lines_csv_block(output_m, output_b);
     }
 }
 
@@ -906,9 +621,6 @@ static AttemptResult solve_case(const std::vector<size_t>& gens, const Options& 
         }
 
         best.projective_rotation = projective_rotation;
-        if (best.feasible) {
-            apply_small_output_rotation(best);
-        }
         return best;
     };
 
@@ -918,15 +630,16 @@ static AttemptResult solve_case(const std::vector<size_t>& gens, const Options& 
         AttemptResult best;
         bool have_best = false;
         for (int rot = 0; rot < max_rotation; ++rot) {
-            OMatrix current;
-            if (!o.rotate(rot, current)) continue;
-            ++tried_rotations;
-            AttemptResult cur = solve_for_omatrix(current, projective_rotation);
-            cur.euclidean_rotation = rot;
-            if (!have_best || better_attempt(cur, best)) {
-                best = std::move(cur);
-                have_best = true;
-            }
+        OMatrix current;
+        if (!o.rotate(rot, current)) continue;
+        ++tried_rotations;
+        AttemptResult cur = solve_for_omatrix(current, projective_rotation);
+        cur.euclidean_rotation = rot;
+        cur.omatrix_gens = omatrix_to_generators(current);
+        if (!have_best || better_attempt(cur, best)) {
+            best = std::move(cur);
+            have_best = true;
+        }
         }
 
         if (!have_best) {
@@ -1098,15 +811,19 @@ int main(int argc, char** argv) {
                         std::cout << "\n";
                         if (result.feasible && opt.print_sat_lines &&
                             result.m_orig.size() == result.n && result.b_orig.size() == result.n) {
-                            std::cout << "#LINES_BEGIN #" << idx << "\n";
-                            std::cout << "m,b\n";
-                            for (size_t i = 0; i < result.n; ++i) {
-                                std::cout << result.m_orig[i] << "," << result.b_orig[i] << "\n";
+                            std::vector<long double> output_m;
+                            std::vector<long double> output_b;
+                            if (build_output_lines_swapped_xy(result, output_m, output_b)) {
+                                std::cout << "#LINES_BEGIN #" << idx << "\n";
+                                std::cout << "m,b\n";
+                                for (size_t i = 0; i < result.n; ++i) {
+                                    std::cout << output_m[i] << "," << output_b[i] << "\n";
+                                }
+                                std::cout << "#LINES_END #" << idx << "\n";
                             }
-                            std::cout << "#LINES_END #" << idx << "\n";
                         }
                         if (result.feasible && opt.print_sat_gens) {
-                            print_generators_line(gens, "GENS #" + std::to_string(idx));
+                            print_generators_line(result.omatrix_gens, "GENS #" + std::to_string(idx));
                         }
                         std::cout.flush();
                         _exit(0);
@@ -1135,6 +852,9 @@ int main(int argc, char** argv) {
         auto result = solve_case(gens, opt);
         const bool include_lines = !(opt.metadata_only && opt.filter_mode);
         print_result(result, opt.output_format, include_lines && opt.output_format == "full", 0);
+        if (result.feasible && opt.print_sat_gens) {
+            print_generators_line(result.omatrix_gens);
+        }
         return result.feasible ? 0 : 1;
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
