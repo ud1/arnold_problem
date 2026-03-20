@@ -7,7 +7,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.TreeMap;
 
 public class OMatrix
@@ -17,6 +16,18 @@ public class OMatrix
     private final int numVertices;
     private final Map<Integer, Integer> parallels = new TreeMap<>();
     private final int hash;
+
+    public OMatrix(ArrayList<ArrayList<Integer>> lineIntersections)
+    {
+        int numVertices = 0;
+        for (ArrayList<Integer> r : lineIntersections)
+            numVertices += r.size();
+
+        this.lineIntersections = lineIntersections;
+        this.numLines = lineIntersections.size();
+        this.numVertices = numVertices / 2;
+        this.hash = computeHash();
+    }
 
     private OMatrix(ArrayList<ArrayList<Integer>> lineIntersections, int numLines, int numVertices)
     {
@@ -500,6 +511,73 @@ public class OMatrix
         }
 
         return false;
+    }
+
+    public OMatrix hyperbolicExtension()
+    {
+        if (numLines % 2 != 1)
+            throw new RuntimeException("Only odd supported");
+        if (!parallels.isEmpty())
+            throw new RuntimeException("Parallels not supported");
+
+        int newN = numLines * 2 - 1;
+        ArrayList<ArrayList<Integer>> newLineIntersections = new ArrayList<>(newN);
+        for (int i = 0; i < newN; ++i)
+        {
+            newLineIntersections.add(new ArrayList<>(newN - 1));
+        }
+
+        int[] lines = new int[numLines];
+        int halfN = (numLines - 1)/2;
+        for (int i = 0; i <= halfN; ++i) {
+            lines[i + halfN] = i;
+            if (i > 0)
+                lines[halfN - i] = newN - i;
+        }
+
+        boolean right = lineIntersections.get(0).get(halfN - 1) > lineIntersections.get(0).get(halfN);
+
+        int startGen = right ? 1 : 0;
+        for (int i = 0; i < numLines; ++i)
+        {
+            for (int g = startGen; g < numLines - 1; g += 2) {
+                newLineIntersections.get(lines[g]).add(lines[g + 1]);
+                newLineIntersections.get(lines[g + 1]).add(lines[g]);
+                int s = lines[g];
+                lines[g] = lines[g + 1];
+                lines[g + 1] = s;
+            }
+
+            if (i < numLines - 1) {
+                int origCrossLine = lineIntersections.get(0).get(i);
+                int crossLine = origCrossLine + halfN; // reindex
+                for (int l : lines)
+                {
+                    newLineIntersections.get(l).add(crossLine);
+                }
+                for (int l : lineIntersections.get(origCrossLine))
+                {
+                    if (l != 0)
+                    {
+                        newLineIntersections.get(crossLine).add(l + halfN);
+                    }
+                    else
+                    {
+                        for (int j = numLines; j --> 0;)
+                        {
+                            newLineIntersections.get(crossLine).add(lines[j]);
+                        }
+                    }
+                }
+            }
+
+            startGen = 1 - startGen;
+        }
+
+        for (int i = newN - halfN; i < newN; ++i)
+            Collections.reverse(newLineIntersections.get(i));
+
+        return new OMatrix(newLineIntersections);
     }
 
     public int getNumLines()
