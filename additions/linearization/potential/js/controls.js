@@ -484,7 +484,7 @@
     document.getElementById("resetViewBtn").addEventListener("click", () => { resetView(); renderScene(); });
     document.getElementById("exportBtn").addEventListener("click", exportSvg);
 
-    ["checkerMode", "coloredMode", "highlightDefects", "showOuter", "showPoints"].forEach(id => {
+    ["checkerMode", "coloredMode", "highlightDefects", "showOuter", "showPoints", "showLineNumbers"].forEach(id => {
       document.getElementById(id).addEventListener("change", (e) => {
         App.state.flags[id] = e.target.checked;
         if (id === "checkerMode") syncCheckerModeAvailability();
@@ -551,7 +551,7 @@
     App.state.view = sanitizeView(persisted && persisted.view, { panX: 0, panY: 0, zoom: 1 });
 
     if (persisted && persisted.flags && typeof persisted.flags === "object") {
-      for (const id of ["checkerMode", "coloredMode", "highlightDefects", "showOuter", "showPoints"]) {
+      for (const id of ["checkerMode", "coloredMode", "highlightDefects", "showOuter", "showPoints", "showLineNumbers"]) {
         if (typeof persisted.flags[id] === "boolean") {
           App.state.flags[id] = persisted.flags[id];
           const el = document.getElementById(id);

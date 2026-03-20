@@ -97,7 +97,8 @@
   function drawLines() {
     const clipPoly = App.state.visibleClipPoly;
     if (!clipPoly) return;
-    const w = App.state.flags.checkerMode ? 1.2 : 0.4;
+    const checkerMode = !!App.state.flags.checkerMode;
+    const w = checkerMode ? 0.12 : 0.4;
     const lineColor = "#000000";
     for (const line of App.state.lines) {
       const seg = App.lineSegmentInPoly(line, clipPoly);
@@ -110,6 +111,244 @@
         "stroke-opacity": 1.0,
         "vector-effect": "non-scaling-stroke",
       }));
+    }
+  }
+
+  function estimateLabelBox(text, center, fontSize) {
+    const width = Math.max(fontSize * 0.9, text.length * fontSize * 0.62);
+    const height = fontSize * 1.1;
+    return {
+      minX: center.x - width * 0.5,
+      maxX: center.x + width * 0.5,
+      minY: center.y - height * 0.5,
+      maxY: center.y + height * 0.5,
+    };
+  }
+
+  function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  function nearestViewportEdge(point, viewportWidth, viewportHeight) {
+    const distances = [
+      { edge: "left", dist: Math.abs(point.x) },
+      { edge: "right", dist: Math.abs(viewportWidth - point.x) },
+      { edge: "top", dist: Math.abs(point.y) },
+      { edge: "bottom", dist: Math.abs(viewportHeight - point.y) },
+    ];
+    distances.sort((a, b) => a.dist - b.dist);
+    return distances[0].edge;
+  }
+
+  function chooseLabelDirection(items, index, axisLimit, minOffset) {
+    const item = items[index];
+    const coord = Number.isFinite(item.spaceIdeal) ? item.spaceIdeal : item.ideal;
+    const lowerDivider = index > 0
+      ? 0.5 * ((Number.isFinite(items[index - 1].spaceIdeal) ? items[index - 1].spaceIdeal : items[index - 1].ideal) + coord)
+      : 0;
+    const upperDivider = index + 1 < items.length
+      ? 0.5 * (coord + (Number.isFinite(items[index + 1].spaceIdeal) ? items[index + 1].spaceIdeal : items[index + 1].ideal))
+      : axisLimit;
+    const edgePad = item.size * 0.5;
+    const slackMinus = Math.max(0, coord - Math.max(lowerDivider, edgePad) - minOffset);
+    const slackPlus = Math.max(0, Math.min(upperDivider, axisLimit - edgePad) - coord - minOffset);
+
+    if (Math.abs(slackPlus - slackMinus) > 1e-9) {
+      return slackPlus > slackMinus ? 1 : -1;
+    }
+    if (Math.abs(upperDivider - lowerDivider) > 1e-9) {
+      return (axisLimit - upperDivider) > lowerDivider ? 1 : -1;
+    }
+    return item.ideal >= axisLimit * 0.5 ? -1 : 1;
+  }
+
+  function packEdgeLabels(items, axisLimit, gapPad) {
+    const n = items.length;
+    if (!n) return;
+
+    const positions = items.map(item => clamp(item.target, item.lo, item.hi));
+    for (let i = 1; i < n; i++) {
+      const gap = (items[i - 1].size + items[i].size) * 0.5 + gapPad;
+      positions[i] = Math.max(positions[i], positions[i - 1] + gap, items[i].lo);
+    }
+    for (let i = n - 2; i >= 0; i--) {
+      const gap = (items[i].size + items[i + 1].size) * 0.5 + gapPad;
+      positions[i] = Math.min(positions[i], positions[i + 1] - gap, items[i].hi);
+    }
+    for (let i = 1; i < n; i++) {
+      const gap = (items[i - 1].size + items[i].size) * 0.5 + gapPad;
+      positions[i] = Math.max(positions[i], positions[i - 1] + gap, items[i].lo);
+    }
+    for (let i = 0; i < n; i++) {
+      items[i].position = clamp(positions[i], items[i].lo, items[i].hi);
+    }
+  }
+
+  function layoutEdgeLabels(items, axisLimit) {
+    if (!items.length) return;
+
+    items.sort((a, b) => {
+      const aCoord = Number.isFinite(a.spaceIdeal) ? a.spaceIdeal : a.ideal;
+      const bCoord = Number.isFinite(b.spaceIdeal) ? b.spaceIdeal : b.ideal;
+      if (Math.abs(aCoord - bCoord) > 1e-9) return aCoord - bCoord;
+      if (Math.abs(a.ideal - b.ideal) > 1e-9) return a.ideal - b.ideal;
+      return a.order - b.order;
+    });
+
+    for (const item of items) {
+      item.ideal = clamp(item.ideal, item.size * 0.5, axisLimit - item.size * 0.5);
+      if (Number.isFinite(item.spaceIdeal)) {
+        item.spaceIdeal = clamp(item.spaceIdeal, item.size * 0.5, axisLimit - item.size * 0.5);
+      }
+    }
+
+    const linePad = 6;
+    const minOffset = linePad + 0.5;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const edgePad = item.size * 0.5;
+      const dir = chooseLabelDirection(items, i, axisLimit, minOffset);
+      const minusTarget = item.ideal - (edgePad + linePad);
+      const plusTarget = item.ideal + (edgePad + linePad);
+      const minusSlack = Math.max(0, item.ideal - edgePad - minOffset);
+      const plusSlack = Math.max(0, axisLimit - edgePad - item.ideal - minOffset);
+      item.dir = dir;
+      item.target = dir < 0 ? minusTarget : plusTarget;
+      item.lo = edgePad;
+      item.hi = axisLimit - edgePad;
+
+      if (dir < 0) {
+        item.hi = Math.min(item.hi, item.ideal - minOffset);
+        if (item.hi < item.lo && plusSlack > minusSlack + 1e-9) {
+          item.dir = 1;
+          item.target = plusTarget;
+          item.lo = Math.max(edgePad, item.ideal + minOffset);
+          item.hi = axisLimit - edgePad;
+        }
+      } else {
+        item.lo = Math.max(item.lo, item.ideal + minOffset);
+        if (item.lo > item.hi && minusSlack > plusSlack + 1e-9) {
+          item.dir = -1;
+          item.target = minusTarget;
+          item.lo = edgePad;
+          item.hi = Math.min(axisLimit - edgePad, item.ideal - minOffset);
+        }
+      }
+
+      if (item.lo > item.hi) {
+        item.lo = edgePad;
+        item.hi = axisLimit - edgePad;
+        item.target = clamp(item.ideal + item.dir * (edgePad + linePad), item.lo, item.hi);
+      }
+    }
+
+    const gapPad = 2;
+    packEdgeLabels(items, axisLimit, gapPad);
+  }
+
+  function drawLineNumbers() {
+    const clipPoly = App.state.visibleClipPoly;
+    if (!clipPoly) return;
+
+    const viewportWidth = App.el.viewer.clientWidth;
+    const viewportHeight = App.el.viewer.clientHeight;
+    const sm = App.buildScreenMatrix();
+    const fontSize = 9.6;
+    const edgeInsetPx = 4;
+    const linePad = 1.5;
+    const edgeItems = { left: [], right: [], top: [], bottom: [] };
+
+    for (let idx = 0; idx < App.state.lines.length; idx++) {
+      const seg = App.lineSegmentInPoly(App.state.lines[idx], clipPoly);
+      if (!seg) continue;
+
+      const p0 = App.applyMat(sm, seg[0]);
+      const p1 = App.applyMat(sm, seg[1]);
+      const dx = p1.x - p0.x;
+      const dy = p1.y - p0.y;
+      const len = Math.hypot(dx, dy);
+      if (!Number.isFinite(len) || len <= App.EPS) continue;
+
+      const text = String(idx);
+      const endpoints = [
+        { point: p0, order: idx * 2 },
+        { point: p1, order: idx * 2 + 1 },
+      ];
+
+      for (const endpoint of endpoints) {
+        const boxAtOrigin = estimateLabelBox(text, { x: 0, y: 0 }, fontSize);
+        const labelWidth = boxAtOrigin.maxX - boxAtOrigin.minX;
+        const labelHeight = boxAtOrigin.maxY - boxAtOrigin.minY;
+        const edge = nearestViewportEdge(endpoint.point, viewportWidth, viewportHeight);
+        if (edge === "left" || edge === "right") {
+          const x = edge === "left"
+            ? edgeInsetPx + labelWidth * 0.5
+            : viewportWidth - edgeInsetPx - labelWidth * 0.5;
+          const innerX = edge === "left" ? x + linePad : x - linePad;
+          const ideal = Math.abs(dx) > 1e-9
+            ? endpoint.point.y + (x - endpoint.point.x) * dy / dx
+            : endpoint.point.y;
+          const spaceIdeal = Math.abs(dx) > 1e-9
+            ? endpoint.point.y + (innerX - endpoint.point.x) * dy / dx
+            : endpoint.point.y;
+          edgeItems[edge].push({
+            text,
+            order: endpoint.order,
+            fixed: x,
+            ideal,
+            spaceIdeal,
+            size: labelHeight,
+            axis: "y",
+          });
+        } else {
+          const y = edge === "top"
+            ? edgeInsetPx + labelHeight * 0.5
+            : viewportHeight - edgeInsetPx - labelHeight * 0.5;
+          const innerY = edge === "top" ? y + linePad : y - linePad;
+          const ideal = Math.abs(dy) > 1e-9
+            ? endpoint.point.x + (y - endpoint.point.y) * dx / dy
+            : endpoint.point.x;
+          const spaceIdeal = Math.abs(dy) > 1e-9
+            ? endpoint.point.x + (innerY - endpoint.point.y) * dx / dy
+            : endpoint.point.x;
+          edgeItems[edge].push({
+            text,
+            order: endpoint.order,
+            fixed: y,
+            ideal,
+            spaceIdeal,
+            size: labelWidth,
+            axis: "x",
+          });
+        }
+      }
+    }
+
+    layoutEdgeLabels(edgeItems.left, viewportHeight);
+    layoutEdgeLabels(edgeItems.right, viewportHeight);
+    layoutEdgeLabels(edgeItems.top, viewportWidth);
+    layoutEdgeLabels(edgeItems.bottom, viewportWidth);
+
+    for (const edge of ["left", "right", "top", "bottom"]) {
+      for (const item of edgeItems[edge]) {
+        const center = item.axis === "y"
+          ? { x: item.fixed, y: item.position }
+          : { x: item.position, y: item.fixed };
+        App.el.labelLayer.appendChild(createSVG("text", {
+          x: center.x,
+          y: center.y,
+          fill: "#1f2937",
+          "font-size": fontSize,
+          "font-family": "IBM Plex Mono, monospace",
+          "text-anchor": "middle",
+          "dominant-baseline": "middle",
+          "paint-order": "stroke",
+          stroke: "#ffffff",
+          "stroke-width": 3,
+          "stroke-linejoin": "round",
+          "vector-effect": "non-scaling-stroke",
+        })).textContent = item.text;
+      }
     }
   }
 
@@ -268,13 +507,15 @@
 
     App.el.polyLayer.innerHTML = "";
     App.el.lineLayer.innerHTML = "";
+    App.el.labelLayer.innerHTML = "";
     App.el.pointLayer.innerHTML = "";
 
     if (!App.state.bbox) return;
     App.state.visibleClipPoly = App.getViewportWorldPolygon();
 
     if (App.state.flags.checkerMode) drawCells();
-    if (!App.state.flags.checkerMode) drawLines();
+    drawLines();
+    if (App.state.flags.showLineNumbers) drawLineNumbers();
     if (App.state.flags.showPoints) drawIntersections();
 
     chooseColorOrientation();
