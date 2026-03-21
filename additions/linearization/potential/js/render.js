@@ -47,17 +47,74 @@
     console.groupEnd();
   }
 
+  function distToLine(p, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-12) return Math.hypot(p.x - a.x, p.y - a.y);
+    return Math.abs((p.x - a.x) * dy - (p.y - a.y) * dx) / len;
+  }
+
+  function isOnViewportEdge(p1, p2, vpPoly) {
+    const eps = 1e-6;
+    for (let i = 0; i < vpPoly.length; i++) {
+      const a = vpPoly[i], b = vpPoly[(i + 1) % vpPoly.length];
+      if (distToLine(p1, a, b) < eps && distToLine(p2, a, b) < eps) return true;
+    }
+    return false;
+  }
+
   function drawCells() {
     const clipPoly = App.state.visibleClipPoly;
     if (!clipPoly) return;
     chooseColorOrientation();
     const coloredMode = !!App.state.flags.coloredMode;
     const highlightDefects = !!App.state.flags.highlightDefects;
+    const showOuter = !!App.state.flags.showOuter;
     const defectFill = "#ff0000";
     const debugRows = [];
     let cellIndex = 0;
+
+    // Pass 1: external black cells — inset stroke on real edges (only when showOuter is OFF)
+    if (!showOuter && !coloredMode) {
+      let extId = 0;
+      for (const c of App.state.cells) {
+        if (!c.external) continue;
+        if (!isBlack(c)) continue;
+        const clipped = App.clipPolygonByConvex(c.poly, clipPoly);
+        if (clipped.length < 3) continue;
+        const realEdges = [];
+        for (let i = 0; i < clipped.length; i++) {
+          const p1 = clipped[i];
+          const p2 = clipped[(i + 1) % clipped.length];
+          if (!isOnViewportEdge(p1, p2, clipPoly)) realEdges.push(p1, p2);
+        }
+        if (!realEdges.length) continue;
+        const polyPoints = clipped.map(p => `${p.x},${p.y}`).join(" ");
+        const d = [];
+        for (let i = 0; i < realEdges.length; i += 2) {
+          d.push(`M${realEdges[i].x},${realEdges[i].y}L${realEdges[i + 1].x},${realEdges[i + 1].y}`);
+        }
+        const clipId = `_ec${extId++}`;
+        const g = createSVG("g", {});
+        const cp = createSVG("clipPath", { id: clipId });
+        cp.appendChild(createSVG("polygon", { points: polyPoints }));
+        g.appendChild(cp);
+        g.appendChild(createSVG("path", {
+          d: d.join(""),
+          fill: "none",
+          stroke: "#000000",
+          "stroke-width": 0.6,
+          "stroke-opacity": 1.0,
+          "vector-effect": "non-scaling-stroke",
+          "clip-path": `url(#${clipId})`,
+        }));
+        App.el.polyLayer.appendChild(g);
+      }
+    }
+
+    // Pass 2: black cells — solid fill
     for (const c of App.state.cells) {
-      if (!App.state.flags.showOuter && c.external) continue;
+      if (!showOuter && c.external) continue;
       const black = isBlack(c);
       if (!black && !coloredMode) continue;
       const clipped = App.clipPolygonByConvex(c.poly, clipPoly);
@@ -514,7 +571,7 @@
     App.state.visibleClipPoly = App.getViewportWorldPolygon();
 
     if (App.state.flags.checkerMode) drawCells();
-    drawLines();
+    if (!App.state.flags.checkerMode) drawLines();
     if (App.state.flags.showLineNumbers) drawLineNumbers();
     if (App.state.flags.showPoints) drawIntersections();
 
