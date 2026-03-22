@@ -11,7 +11,6 @@
 #include <stdexcept>
 #include <unistd.h>
 
-#include "common/edge_specs.h"
 #include "common/input_parsing.h"
 #include "common/omatrix.h"
 
@@ -20,20 +19,13 @@ static void print_usage(const char* argv0) {
         << "Usage:\n"
         << "  " << argv0 << " --gens \"0 1 0 2 ...\"\n"
         << "  " << argv0 << " --gens-file path/to/gens.txt\n"
-        << "  " << argv0 << " --axis-pair [I,J] [--axis-eps E] --gens \"...\"\n"
-        << "  " << argv0 << " --hyperbolic-axis [--axis-eps E] --gens \"...\"\n"
         << "  " << argv0 << " 0 1 0 2 ...\n"
         << "  cat input.txt | " << argv0 << " [--max-steps N]\n"
-        << "  " << argv0 << " [--max-steps N] [--axis-pair [I,J]] [--axis-eps E] [--min-angle A] [--require-margin] [--metadata-only]\n"
+        << "  " << argv0 << " [--max-steps N] [--min-angle A] [--require-margin] [--metadata-only]\n"
         << "\n"
         << "Notes:\n"
         << "  Default is 'no limit' on iterations.\n"
         << "  --max-steps N sets a limit; --max-steps 0 means 'no limit'.\n"
-        << "  --axis-pair I,J enables fixed-slope axis mode for adjacent lines I and J.\n"
-        << "  --axis-pair without I,J fixes boundary lines 0 and n-1 near vertical.\n"
-        << "  --hyperbolic-axis fixes line 0 as x=0 and fixes b_i as in hyperbolic_axis.\n"
-        << "  In dedicated axis tools, --projective-rotations now means identity plus all projective rotations.\n"
-        << "  --axis-eps E sets axis half-gap in angle space (default: 0.0001).\n"
         << "  --min-angle A sets the angle-margin penalty threshold in slope-space (default: 0.01).\n"
         << "  --require-margin treats SAT as success only when margin checks pass.\n"
         << "  --metadata-only suppresses generator output in pipe mode.\n"
@@ -66,15 +58,6 @@ static void print_omatrix(std::ostream& out, const OMatrix& o) {
     out << "]\n";
 }
 
-static bool parse_axis_pair_spec(const std::string& s, size_t& left, size_t& right) {
-    auto nums = extract_nonnegative_ints(s);
-    if (nums.size() != 2) return false;
-    left = nums[0];
-    right = nums[1];
-    if (left > right) std::swap(left, right);
-    return true;
-}
-
 // "Margin" used in hinge penalties max(raw + min_*, 0)^2.
 // Strict feasibility is always checked against raw < 0.
 static double g_min_edge = 1.0;
@@ -91,66 +74,6 @@ static double g_reg_lse_temperature = 5.0;
 static double g_reg_activation_loss = 1e-3;
 static double g_reg_scale_smooth = 0.02;
 static double g_reg_runtime_scale = 0.0;
-
-struct AxisModeConfig {
-    enum class Kind {
-        None,
-        PairSlopes,
-        HyperbolicIntercepts,
-    };
-
-    Kind kind = Kind::None;
-    bool enabled = false;
-    bool boundary_pair = false;
-    size_t left = 0;
-    size_t right = 0;
-    double eps = 1e-4;
-};
-
-// HyperEdgeTerm is now EdgeSpec from common/edge_specs.h
-using HyperEdgeTerm = EdgeSpec;
-
-static std::vector<double> build_hyperbolic_b(const OMatrix& o, size_t axis_line, double eps) {
-    if (o.n % 2 == 0) throw std::runtime_error("Hyperbolic axis mode supports only odd n");
-    if (!(eps > 0.0) || !std::isfinite(eps)) throw std::runtime_error("Axis eps must be finite and > 0");
-
-    const size_t n = o.n;
-    const size_t p = (n - 1) / 2;
-    const double pi = std::acos(-1.0);
-    const double delta = pi / (2.0 * static_cast<double>(p));
-
-    if (eps >= delta) {
-        throw std::runtime_error("Hyperbolic axis mode requires eps < pi/(n-1)");
-    }
-
-    const auto& row = o.intersections[axis_line];
-    if (row.size() != n - 1) {
-        throw std::runtime_error("Selected hyperbolic axis must intersect all other lines");
-    }
-
-    std::vector<double> thetas;
-    thetas.reserve(n - 1);
-    for (size_t k = p - 1; k >= 1; --k) {
-        thetas.push_back(-static_cast<double>(k) * delta);
-        if (k == 1) break;
-    }
-    thetas.push_back(-eps);
-    thetas.push_back(+eps);
-    for (size_t k = 1; k <= p - 1; ++k) {
-        thetas.push_back(static_cast<double>(k) * delta);
-    }
-
-    std::vector<double> b(n, 0.0);
-    for (size_t idx = 0; idx < row.size(); ++idx) {
-        double t = std::tan(thetas[idx]);
-        if (!std::isfinite(t)) {
-            throw std::runtime_error("Hyperbolic axis mode produced non-finite tan(theta)");
-        }
-        b[row[idx]] = t;
-    }
-    b[axis_line] = 0.0;
-    return b;
-}
 
 struct EdgeTerm {
     size_t p1, p2, p3, p4, p5, p6, p7, p8;
@@ -247,19 +170,11 @@ struct AngleTerm {
 struct Terms {
     std::vector<EdgeTerm> edgeTerms;
     std::vector<AngleTerm> angleTerms;
-    std::vector<HyperEdgeTerm> hyperEdgeTerms;
     std::vector<double> params;
     std::vector<double> saved_params;
     std::vector<double> grad;
     std::vector<double> prev_grad;
     size_t n;
-    bool hyperbolic_axis_mode = false;
-    bool freeze_b_all = false;
-    bool freeze_m = false;
-    bool freeze_axis_b = false;
-    size_t axis_left = 0;
-    size_t axis_right = 0;
-    size_t hyper_axis = 0;
 
     struct SatStats {
         bool strict_ok;
@@ -288,43 +203,6 @@ struct Terms {
     };
 
     IntersectionPoint make_intersection_point(size_t i, size_t j) const {
-        if (hyperbolic_axis_mode) {
-            if (i > j) std::swap(i, j);
-            if (i == hyper_axis) {
-                double bj = params[j + n];
-                return IntersectionPoint{
-                    bj,
-                    0.0,
-                    {0, 0, 0, 0},
-                    {0.0, 0.0, 0.0, 0.0},
-                    {0.0, 0.0, 0.0, 0.0}
-                };
-            }
-
-            double mi = params[i];
-            double mj = params[j];
-            double bi = params[i + n];
-            double bj = params[j + n];
-            double denom = mi - mj;
-            if (std::abs(denom) < 1e-12) {
-                denom = (denom >= 0.0) ? 1e-12 : -1e-12;
-            }
-            double num = bj - bi;
-            double x = num / denom;
-            double y = mi * x + bi;
-            double dxdmi = -(num) / (denom * denom);
-            double dxdmj =  (num) / (denom * denom);
-            double dydmi = x + mi * dxdmi;
-            double dydmj = mi * dxdmj;
-            return IntersectionPoint{
-                y,
-                x,
-                {i, j, 0, 0},
-                {dydmi, dydmj, 0.0, 0.0},
-                {dxdmi, dxdmj, 0.0, 0.0}
-            };
-        }
-
         double mi = params[i];
         double mj = params[j];
         double bi = params[i + n];
@@ -468,7 +346,7 @@ struct Terms {
         return soft_log_max - soft_log_min;
     }
 
-    Terms(OMatrix &o, const AxisModeConfig& axis_mode = AxisModeConfig{}) {
+    Terms(OMatrix &o) {
         n = o.n;
 
         for (size_t i = 0; i < o.n; ++i) {
@@ -487,122 +365,8 @@ struct Terms {
         auto m = [](size_t i){return i;};
         auto b = [line_count](size_t i){return i + line_count;};
 
-        if (!axis_mode.enabled || axis_mode.kind == AxisModeConfig::Kind::None) {
-            for (size_t i = 0; i < o.n - 1; ++i) {
-                angleTerms.emplace_back(m(i), m(i + 1));
-            }
-        } else if (axis_mode.kind == AxisModeConfig::Kind::PairSlopes) {
-            if (n < 2) {
-                throw std::runtime_error("Axis mode requires at least 2 lines");
-            }
-            if (!(axis_mode.eps > 0.0)) {
-                throw std::runtime_error("Axis eps must be > 0");
-            }
-            const double pi = std::acos(-1.0);
-            const double half_pi = pi * 0.5;
-
-            if (axis_mode.boundary_pair) {
-                const size_t axis_left = 0;
-                const size_t axis_right = n - 1;
-                const double delta = pi / (2.0 * static_cast<double>(n - 1));
-                const double eps_max = pi / static_cast<double>(n - 1);
-                if (axis_mode.eps >= eps_max) {
-                    throw std::runtime_error("Boundary axis mode requires eps < pi/(n-1)");
-                }
-
-                for (size_t i = 0; i < n; ++i) {
-                    double theta = 0.0;
-                    if (i == axis_left) {
-                        theta = -half_pi + axis_mode.eps;
-                    } else if (i == axis_right) {
-                        theta = half_pi - axis_mode.eps;
-                    } else {
-                        size_t mid_i = i - 1;
-                        double q = static_cast<double>(2 * mid_i) - static_cast<double>(n - 3);
-                        theta = q * delta;
-                    }
-
-                    double abs_theta = std::abs(theta);
-                    if (abs_theta >= (half_pi - 1e-12)) {
-                        throw std::runtime_error("Boundary axis placement makes some angles reach pi/2; choose smaller eps");
-                    }
-                    params[i] = std::tan(theta);
-                }
-
-                freeze_m = true;
-                freeze_axis_b = true;
-                this->axis_left = axis_left;
-                this->axis_right = axis_right;
-                params[axis_left + n] = 0.0;
-                params[axis_right + n] = 0.0;
-            } else {
-                if (axis_mode.right != axis_mode.left + 1) {
-                    throw std::runtime_error("Axis pair must be adjacent: J = I + 1");
-                }
-                if (axis_mode.right >= n) {
-                    throw std::runtime_error("Axis pair index is out of range for this case");
-                }
-                const size_t axis_left = axis_mode.left;
-                const size_t axis_right = axis_mode.right;
-                const double delta = pi / (2.0 * static_cast<double>(n - 1));
-                if (axis_mode.eps >= 2.0 * delta) {
-                    throw std::runtime_error("Axis eps must be smaller than pi/(n-1)");
-                }
-
-                for (size_t i = 0; i < n; ++i) {
-                    double theta = 0.0;
-                    const double q_axis = static_cast<double>(2 * axis_left) - static_cast<double>(n - 2);
-                    const double theta_axis = q_axis * delta;
-                    if (i == axis_left) {
-                        theta = theta_axis - axis_mode.eps;
-                    } else if (i == axis_right) {
-                        theta = theta_axis + axis_mode.eps;
-                    } else {
-                        size_t dir_i = (i < axis_left) ? i : (i - 1);
-                        double q = static_cast<double>(2 * dir_i) - static_cast<double>(n - 2);
-                        theta = q * delta;
-                    }
-
-                    double abs_theta = std::abs(theta);
-                    if (abs_theta >= (half_pi - 1e-12)) {
-                        throw std::runtime_error("Axis placement makes some angles reach pi/2; choose a more central axis pair");
-                    }
-                    params[i] = std::tan(theta);
-                }
-
-                freeze_m = true;
-                freeze_axis_b = true;
-                this->axis_left = axis_left;
-                this->axis_right = axis_right;
-                params[axis_left + n] = 0.0;
-                params[axis_right + n] = 0.0;
-            }
-        } else if (axis_mode.kind == AxisModeConfig::Kind::HyperbolicIntercepts) {
-            if (n < 3) {
-                throw std::runtime_error("Hyperbolic axis mode requires at least 3 lines");
-            }
-            hyperbolic_axis_mode = true;
-            freeze_b_all = true;
-            hyper_axis = 0;
-            std::vector<double> fixed_b = build_hyperbolic_b(o, hyper_axis, axis_mode.eps);
-            for (size_t i = 0; i < n; ++i) {
-                params[i + n] = fixed_b[i];
-            }
-            params[hyper_axis] = 0.0;
-            params[hyper_axis + n] = 0.0;
-            for (size_t i = 1; i < n; ++i) {
-                params[i] = static_cast<double>(i);
-            }
-            hyperEdgeTerms = build_edge_specs(o);
-            for (size_t i = 1; i + 1 < n; ++i) {
-                angleTerms.emplace_back(m(i), m(i + 1));
-            }
-        } else {
-            throw std::runtime_error("Unsupported axis mode kind");
-        }
-
-        if (hyperbolic_axis_mode) {
-            return;
+        for (size_t i = 0; i < o.n - 1; ++i) {
+            angleTerms.emplace_back(m(i), m(i + 1));
         }
 
         for (size_t i = 0; i < o.n; ++i) {
@@ -662,19 +426,9 @@ struct Terms {
         {
             result += t.value2(params);
         }
-        if (hyperbolic_axis_mode) {
-            for (const auto& t : hyperEdgeTerms) {
-                double c12 = params[t.b1 + n] - params[t.b2 + n];
-                double c34 = params[t.b3 + n] - params[t.b4 + n];
-                double raw = c12 * (params[t.m1] - params[t.m2]) - c34 * (params[t.m3] - params[t.m4]);
-                double shifted = raw + g_min_edge;
-                if (shifted > 0.0) result += shifted * shifted;
-            }
-        } else {
-            for (auto &t : edgeTerms)
-            {
-                result += t.value2(params);
-            }
+        for (auto &t : edgeTerms)
+        {
+            result += t.value2(params);
         }
         return result;
     }
@@ -769,24 +523,9 @@ struct Terms {
             t.grad(params, grad);
         }
 
-        if (hyperbolic_axis_mode) {
-            for (const auto& t : hyperEdgeTerms) {
-                double c12 = params[t.b1 + n] - params[t.b2 + n];
-                double c34 = params[t.b3 + n] - params[t.b4 + n];
-                double raw = c12 * (params[t.m1] - params[t.m2]) - c34 * (params[t.m3] - params[t.m4]);
-                double shifted = raw + g_min_edge;
-                if (shifted <= 0.0) continue;
-                double scale = 2.0 * shifted;
-                grad[t.m1] += scale * c12;
-                grad[t.m2] -= scale * c12;
-                grad[t.m3] -= scale * c34;
-                grad[t.m4] += scale * c34;
-            }
-        } else {
-            for (auto &t : edgeTerms)
-            {
-                t.grad(params, grad);
-            }
+        for (auto &t : edgeTerms)
+        {
+            t.grad(params, grad);
         }
 
         double reg_scale = g_reg_runtime_scale;
@@ -820,23 +559,6 @@ struct Terms {
         }
 
         double result = 0.0;
-        if (hyperbolic_axis_mode) {
-            grad[hyper_axis] = 0.0;
-        }
-        if (freeze_b_all) {
-            for (size_t i = 0; i < n; ++i) {
-                grad[i + n] = 0.0;
-            }
-        }
-        if (freeze_m) {
-            for (size_t i = 0; i < n; ++i) {
-                grad[i] = 0.0;
-            }
-        }
-        if (freeze_axis_b) {
-            grad[axis_left + n] = 0.0;
-            grad[axis_right + n] = 0.0;
-        }
         for (auto &v : grad)
         {
             result += v*v;
@@ -847,29 +569,6 @@ struct Terms {
 
     void step(double v)
     {
-        if (hyperbolic_axis_mode) {
-            for (size_t i = 0; i < n; ++i) {
-                if (i == hyper_axis) continue;
-                params[i] -= grad[i] * v;
-            }
-            params[hyper_axis] = 0.0;
-            return;
-        }
-
-        if (freeze_m) {
-            for (size_t i = n; i < params.size(); ++i) {
-                if (freeze_axis_b && (i == axis_left + n || i == axis_right + n)) {
-                    continue;
-                }
-                params[i] -= grad[i] * v;
-            }
-            if (freeze_axis_b) {
-                params[axis_left + n] = 0.0;
-                params[axis_right + n] = 0.0;
-            }
-            return;
-        }
-
         for (size_t i = 0; i < params.size(); ++i) {
             params[i] -= grad[i] * v;
         }
@@ -884,22 +583,11 @@ struct Terms {
             }
         }
 
-        if (hyperbolic_axis_mode) {
-            for (const auto& t : hyperEdgeTerms) {
-                double c12 = params[t.b1 + n] - params[t.b2 + n];
-                double c34 = params[t.b3 + n] - params[t.b4 + n];
-                double raw = c12 * (params[t.m1] - params[t.m2]) - c34 * (params[t.m3] - params[t.m4]);
-                if (!(raw < 0.0)) {
-                    return false;
-                }
-            }
-        } else {
-            for (auto &t : edgeTerms)
+        for (auto &t : edgeTerms)
+        {
+            if (!t.satisfied(params))
             {
-                if (!t.satisfied(params))
-                {
-                    return false;
-                }
+                return false;
             }
         }
 
@@ -929,35 +617,17 @@ struct Terms {
             }
         }
 
-        if (hyperbolic_axis_mode) {
-            for (const auto& t : hyperEdgeTerms) {
-                double c12 = params[t.b1 + n] - params[t.b2 + n];
-                double c34 = params[t.b3 + n] - params[t.b4 + n];
-                double r = c12 * (params[t.m1] - params[t.m2]) - c34 * (params[t.m3] - params[t.m4]);
-                st.worst_raw = std::max(st.worst_raw, r);
-                st.worst_shifted = std::max(st.worst_shifted, r + g_min_edge);
-                if (!(r < 0.0)) {
-                    st.strict_ok = false;
-                    st.strict_violations++;
-                }
-                if (!((r + g_min_edge) < 0.0)) {
-                    st.margin_ok = false;
-                    st.margin_violations++;
-                }
+        for (const auto& t : edgeTerms) {
+            double r = t.raw(params);
+            st.worst_raw = std::max(st.worst_raw, r);
+            st.worst_shifted = std::max(st.worst_shifted, r + g_min_edge);
+            if (!(r < 0.0)) {
+                st.strict_ok = false;
+                st.strict_violations++;
             }
-        } else {
-            for (const auto& t : edgeTerms) {
-                double r = t.raw(params);
-                st.worst_raw = std::max(st.worst_raw, r);
-                st.worst_shifted = std::max(st.worst_shifted, r + g_min_edge);
-                if (!(r < 0.0)) {
-                    st.strict_ok = false;
-                    st.strict_violations++;
-                }
-                if (!((r + g_min_edge) < 0.0)) {
-                    st.margin_ok = false;
-                    st.margin_violations++;
-                }
+            if (!((r + g_min_edge) < 0.0)) {
+                st.margin_ok = false;
+                st.margin_violations++;
             }
         }
 
@@ -1013,14 +683,6 @@ struct Terms {
         for (size_t i = 0; i < n; ++i) {
             double m = params[i];
             double b = params[i + n];
-            if (hyperbolic_axis_mode) {
-                if (i == hyper_axis) {
-                    std::cout << "y = 0 * x + 0" << std::endl;
-                    continue;
-                }
-                m = 1.0 / params[i];
-                b = -params[i + n] / params[i];
-            }
             std::cout << "y = " << m << " * x ";
             if (b >= 0.0)
                 std::cout << " +";
@@ -1032,15 +694,7 @@ struct Terms {
         size_t n = params.size() / 2;
         out << std::setprecision(17) << "m,b\n";
         for (size_t i = 0; i < n; ++i) {
-            if (hyperbolic_axis_mode) {
-                if (i == hyper_axis) {
-                    out << 0.0 << "," << 0.0 << "\n";
-                } else {
-                    out << (1.0 / params[i]) << "," << (-params[i + n] / params[i]) << "\n";
-                }
-            } else {
-                out << params[i] << "," << params[i + n] << "\n";
-            }
+            out << params[i] << "," << params[i + n] << "\n";
         }
         out << std::defaultfloat;
     }
@@ -1050,15 +704,7 @@ struct Terms {
         out << std::setprecision(17) << "[";
         for (size_t i = 0; i < line_count; ++i) {
             if (i != 0) out << ", ";
-            if (hyperbolic_axis_mode) {
-                if (i == hyper_axis) {
-                    out << "(" << 0.0 << "," << 0.0 << ")";
-                } else {
-                    out << "(" << (1.0 / params[i]) << "," << (-params[i + line_count] / params[i]) << ")";
-                }
-            } else {
-                out << "(" << params[i] << "," << params[i + line_count] << ")";
-            }
+            out << "(" << params[i] << "," << params[i + line_count] << ")";
         }
         out << "]\n" << std::defaultfloat;
     }
@@ -1068,15 +714,7 @@ struct Terms {
         out << std::setprecision(17) << "[";
         for (size_t i = 0; i < line_count; ++i) {
             if (i != 0) out << ",";
-            if (hyperbolic_axis_mode) {
-                if (i == hyper_axis) {
-                    out << "{\"m\":0,\"b\":0}";
-                } else {
-                    out << "{\"m\":" << (1.0 / params[i]) << ",\"b\":" << (-params[i + line_count] / params[i]) << "}";
-                }
-            } else {
-                out << "{\"m\":" << params[i] << ",\"b\":" << params[i + line_count] << "}";
-            }
+            out << "{\"m\":" << params[i] << ",\"b\":" << params[i + line_count] << "}";
         }
         out << "]\n" << std::defaultfloat;
     }
@@ -1229,7 +867,6 @@ int main(int argc, char** argv) {
     bool require_margin = false;
     bool metadata_only = false;
     bool print_o_matrix = false;
-    AxisModeConfig axis_mode;
     for (int argi = 1; argi < argc; ++argi) {
         std::string arg = argv[argi];
         if (arg == "--help" || arg == "-h") {
@@ -1272,40 +909,6 @@ int main(int argc, char** argv) {
             } else {
                 unlimited_steps = false;
             }
-            continue;
-        }
-        if (arg == "--axis-pair") {
-            axis_mode.enabled = true;
-            axis_mode.kind = AxisModeConfig::Kind::PairSlopes;
-            axis_mode.boundary_pair = true;
-            if (argi + 1 < argc) {
-                std::string next = argv[argi + 1];
-                if (!next.empty() && next[0] != '-' && next.find(',') != std::string::npos) {
-                    size_t left = 0, right = 0;
-                    if (!parse_axis_pair_spec(next, left, right)) {
-                        std::cerr << "Invalid --axis-pair format. Expected I,J\n";
-                        return 2;
-                    }
-                    axis_mode.boundary_pair = false;
-                    axis_mode.left = left;
-                    axis_mode.right = right;
-                    ++argi;
-                }
-            }
-            continue;
-        }
-        if (arg == "--hyperbolic-axis") {
-            axis_mode.enabled = true;
-            axis_mode.kind = AxisModeConfig::Kind::HyperbolicIntercepts;
-            axis_mode.boundary_pair = false;
-            continue;
-        }
-        if (arg == "--axis-eps") {
-            if (argi + 1 >= argc) {
-                std::cerr << "Missing value for --axis-eps\n";
-                return 2;
-            }
-            axis_mode.eps = std::stod(argv[++argi]);
             continue;
         }
         if (arg == "--min-angle") {
@@ -1362,11 +965,11 @@ int main(int argc, char** argv) {
                 std::cout << "#O_MATRIX_END #" << case_index << "\n";
             }
             try {
-                Terms terms_case{o_case, axis_mode};
+                Terms terms_case{o_case};
                 auto res = solve_for_filter(terms_case, max_steps_limit, unlimited_steps, step);
                 print_filter_case_line(res, case_index - 1, gens_case, metadata_only);
             } catch (const std::exception& e) {
-                std::cerr << "Axis mode error on case #" << case_index << ": " << e.what() << "\n";
+                std::cerr << "Error on case #" << case_index << ": " << e.what() << "\n";
                 return 2;
             }
         }
@@ -1387,60 +990,7 @@ int main(int argc, char** argv) {
         std::cout << "#O_MATRIX_END\n";
     }
 
-    if (axis_mode.enabled && o.n < 2) {
-        std::cerr << "Axis mode error: at least two lines are required\n";
-        return 2;
-    }
-
-    if (axis_mode.enabled && !(axis_mode.eps > 0.0)) {
-        std::cerr << "Axis mode error: axis eps must be > 0\n";
-        return 2;
-    }
-
-    if (axis_mode.enabled) {
-        const double pi = std::acos(-1.0);
-        if (axis_mode.kind == AxisModeConfig::Kind::HyperbolicIntercepts) {
-            if (o.n % 2 == 0) {
-                std::cerr << "Axis mode error: --hyperbolic-axis requires odd n\n";
-                return 2;
-            }
-            const double eps_max = pi / static_cast<double>(o.n - 1);
-            if (axis_mode.eps >= eps_max) {
-                std::cerr << "Axis mode error: --hyperbolic-axis requires axis eps < pi/(n-1)\n";
-                return 2;
-            }
-        } else if (axis_mode.boundary_pair) {
-            const double eps_max = pi / static_cast<double>(o.n - 1);
-            if (axis_mode.eps >= eps_max) {
-                std::cerr << "Axis mode error: boundary --axis-pair requires axis eps < pi/(n-1)\n";
-                return 2;
-            }
-        } else {
-            if (axis_mode.right >= o.n) {
-                std::cerr << "Axis mode error: axis pair is out of range for n=" << o.n << "\n";
-                return 2;
-            }
-            if (axis_mode.right != axis_mode.left + 1) {
-                std::cerr << "Axis mode error: axis pair must be adjacent\n";
-                return 2;
-            }
-            const double delta = pi / (2.0 * static_cast<double>(o.n - 1));
-            if (axis_mode.eps >= 2.0 * delta) {
-                std::cerr << "Axis mode error: axis eps must be smaller than pi/(n-1)\n";
-                return 2;
-            }
-        }
-    }
-
     Terms terms{o};
-    if (axis_mode.enabled) {
-        try {
-            terms = Terms{o, axis_mode};
-        } catch (const std::exception& e) {
-            std::cerr << "Axis mode error: " << e.what() << "\n";
-            return 2;
-        }
-    }
 
     double best_result = std::numeric_limits<double>::infinity();
     size_t sat_hits = 0;
