@@ -16,7 +16,7 @@
 #include <stdint.h>
 #include <time.h>
 
-#define N_MAX 32
+#define N_MAX 64
 
 /* ── Chi (chirotope) ───────────────────────────────────────────── */
 
@@ -31,8 +31,8 @@ static int chi_trail_len;
  * Left candidate:  (pred_mask[p][e] & rem_mask[p]) == 0
  * Right candidate: (succ_mask[p][e] & rem_mask[p]) == 0
  */
-static uint32_t pred_mask[N_MAX+1][N_MAX+1];
-static uint32_t succ_mask[N_MAX+1][N_MAX+1];
+static uint64_t pred_mask[N_MAX+1][N_MAX+1];
+static uint64_t succ_mask[N_MAX+1][N_MAX+1];
 
 /* Trail for ordering updates: each entry is (h, a, b) meaning
  * pred_mask[h][b] |= (1<<a) and succ_mask[h][a] |= (1<<b) was done.
@@ -49,8 +49,8 @@ static void ord_undo(int mark) {
         int h = ord_trail[idx*3];
         int a = ord_trail[idx*3+1];
         int b = ord_trail[idx*3+2];
-        pred_mask[h][b] &= ~(1u << a);
-        succ_mask[h][a] &= ~(1u << b);
+        pred_mask[h][b] &= ~(1ULL << a);
+        succ_mask[h][a] &= ~(1ULL << b);
     }
 }
 
@@ -58,21 +58,21 @@ static void ord_undo(int mark) {
 
 static int n_val;
 static int8_t sgn[N_MAX+1][N_MAX+1];
-static uint32_t rem_mask[N_MAX+1];
+static uint64_t rem_mask[N_MAX+1];
 
 /* Update ordering masks when chi_v[h][a][b] is newly set to val_hab */
 static inline void update_ordering(int h, int a, int b, int val_hab) {
     if (h < 1 || h == n_val) return;
     if (a == h || b == h) return;
-    uint32_t rh = rem_mask[h];
-    if (!((rh & (1u << a)) && (rh & (1u << b)))) return;
+    uint64_t rh = rem_mask[h];
+    if (!((rh & (1ULL << a)) && (rh & (1ULL << b)))) return;
 
     int expected = sgn[h][a] * sgn[h][b];
     if (val_hab == expected) {
         /* a before b on hyperline h */
-        if (!(pred_mask[h][b] & (1u << a))) {
-            pred_mask[h][b] |= (1u << a);
-            succ_mask[h][a] |= (1u << b);
+        if (!(pred_mask[h][b] & (1ULL << a))) {
+            pred_mask[h][b] |= (1ULL << a);
+            succ_mask[h][a] |= (1ULL << b);
             int idx = ord_trail_len++;
             ord_trail[idx*3]   = h;
             ord_trail[idx*3+1] = a;
@@ -80,9 +80,9 @@ static inline void update_ordering(int h, int a, int b, int val_hab) {
         }
     } else {
         /* b before a on hyperline h */
-        if (!(pred_mask[h][a] & (1u << b))) {
-            pred_mask[h][a] |= (1u << b);
-            succ_mask[h][b] |= (1u << a);
+        if (!(pred_mask[h][a] & (1ULL << b))) {
+            pred_mask[h][a] |= (1ULL << b);
+            succ_mask[h][b] |= (1ULL << a);
             int idx = ord_trail_len++;
             ord_trail[idx*3]   = h;
             ord_trail[idx*3+1] = b;
@@ -237,11 +237,11 @@ static int apply_triangle(int p, int a, int b) {
 static inline int is_block_endpoint(int p, int e) {
     int nc = nbr_count[p][e];
     if (nc < 2) return 1;
-    uint32_t rp = rem_mask[p];
+    uint64_t rp = rem_mask[p];
     int rem_nbrs = 0;
     for (int i = 0; i < nc; i++) {
         int nb = nbr_data[p][e][i];
-        if (rp & (1u << nb))
+        if (rp & (1ULL << nb))
             if (++rem_nbrs >= 2) return 0;
     }
     return 1;
@@ -250,13 +250,13 @@ static inline int is_block_endpoint(int p, int e) {
 /* ── get_left_candidates ──────────────────────────────────────── */
 
 static int get_left_candidates(int p, int *cands) {
-    uint32_t rp = rem_mask[p];
+    uint64_t rp = rem_mask[p];
     int f = left_arr[p][left_len[p] - 1];
     int cnt = 0;
 
-    uint32_t mask = rp;
+    uint64_t mask = rp;
     while (mask) {
-        int e = __builtin_ctz(mask);
+        int e = __builtin_ctzll(mask);
         mask &= mask - 1;
 
         if (!is_block_endpoint(p, e))
@@ -276,13 +276,13 @@ static int get_left_candidates(int p, int *cands) {
 /* ── get_right_candidates ─────────────────────────────────────── */
 
 static int get_right_candidates(int p, int *cands) {
-    uint32_t rp = rem_mask[p];
+    uint64_t rp = rem_mask[p];
     int f = right_arr[p][right_len[p] - 1];
     int cnt = 0;
 
-    uint32_t mask = rp;
+    uint64_t mask = rp;
     while (mask) {
-        int e = __builtin_ctz(mask);
+        int e = __builtin_ctzll(mask);
         mask &= mask - 1;
 
         if (!is_block_endpoint(p, e))
@@ -306,7 +306,7 @@ static int place_left(int p, int e) {
     int se = sp[e];
     int f = left_arr[p][left_len[p] - 1];
 
-    rem_mask[p] &= ~(1u << e);
+    rem_mask[p] &= ~(1ULL << e);
     left_arr[p][left_len[p]] = e;
     left_len[p]++;
 
@@ -324,9 +324,9 @@ static int place_left(int p, int e) {
             return 0;
     }
     /* Chi: e before all remaining gap elements */
-    uint32_t rmask = rem_mask[p];
+    uint64_t rmask = rem_mask[p];
     while (rmask) {
-        int x = __builtin_ctz(rmask);
+        int x = __builtin_ctzll(rmask);
         rmask &= rmask - 1;
         if (!chi_put(p, x, e, -(sp[x] * se)))
             return 0;
@@ -348,7 +348,7 @@ static int place_left(int p, int e) {
 
 static void unplace_left(int p, int e) {
     left_len[p]--;
-    rem_mask[p] |= (1u << e);
+    rem_mask[p] |= (1ULL << e);
 }
 
 /* ── place_right ──────────────────────────────────────────────── */
@@ -358,7 +358,7 @@ static int place_right(int p, int e) {
     int se = sp[e];
     int f = right_arr[p][right_len[p] - 1];
 
-    rem_mask[p] &= ~(1u << e);
+    rem_mask[p] &= ~(1ULL << e);
     right_arr[p][right_len[p]] = e;
     right_len[p]++;
 
@@ -369,9 +369,9 @@ static int place_right(int p, int e) {
             return 0;
     }
     /* Chi: all remaining gap elements come before e */
-    uint32_t rmask = rem_mask[p];
+    uint64_t rmask = rem_mask[p];
     while (rmask) {
-        int x = __builtin_ctz(rmask);
+        int x = __builtin_ctzll(rmask);
         rmask &= rmask - 1;
         if (!chi_put(p, x, e, sp[x] * se))
             return 0;
@@ -400,7 +400,7 @@ static int place_right(int p, int e) {
 
 static void unplace_right(int p, int e) {
     right_len[p]--;
-    rem_mask[p] |= (1u << e);
+    rem_mask[p] |= (1ULL << e);
 }
 
 /* ── extract_tri ──────────────────────────────────────────────── */
@@ -416,21 +416,21 @@ static int build_sequence(int p, int *seq) {
 
 static int extract_tri_count(void) {
     int n = n_val;
-    static uint32_t adj[N_MAX+1][N_MAX+1];
+    static uint64_t adj[N_MAX+1][N_MAX+1];
     memset(adj, 0, sizeof(adj));
 
     for (int i = 0; i < hn_len; i++) {
         int j = (i + 1) % hn_len;
-        adj[n][hn[i]] |= 1u << hn[j];
-        adj[n][hn[j]] |= 1u << hn[i];
+        adj[n][hn[i]] |= 1ULL << hn[j];
+        adj[n][hn[j]] |= 1ULL << hn[i];
     }
     for (int p = 1; p < n; p++) {
         int seq[N_MAX];
         int len = build_sequence(p, seq);
         for (int i = 0; i < len; i++) {
             int j = (i + 1) % len;
-            adj[p][seq[i]] |= 1u << seq[j];
-            adj[p][seq[j]] |= 1u << seq[i];
+            adj[p][seq[i]] |= 1ULL << seq[j];
+            adj[p][seq[j]] |= 1ULL << seq[i];
         }
     }
 
@@ -438,9 +438,9 @@ static int extract_tri_count(void) {
     for (int i = 1; i <= n; i++)
         for (int j = i + 1; j <= n; j++)
             for (int k = j + 1; k <= n; k++) {
-                if ((adj[i][j] & (1u << k)) &&
-                    (adj[j][i] & (1u << k)) &&
-                    (adj[k][i] & (1u << j)))
+                if ((adj[i][j] & (1ULL << k)) &&
+                    (adj[j][i] & (1ULL << k)) &&
+                    (adj[k][i] & (1ULL << j)))
                     count++;
             }
     return count;
@@ -583,6 +583,9 @@ typedef struct {
     int side;
 } ForcedEntry;
 
+static ForcedEntry forced_stack[N_MAX * N_MAX * N_MAX];
+static int forced_stack_top;
+
 static void solve(void) {
     int n = n_val;
     if (max_results_val > 0 && result_count >= max_results_val)
@@ -593,13 +596,13 @@ static void solve(void) {
         int done = 0, total_rem = 0;
         for (int p = 1; p < n; p++) {
             if (rem_mask[p] == 0) done++;
-            total_rem += __builtin_popcount(rem_mask[p]);
+            total_rem += __builtin_popcountll(rem_mask[p]);
         }
         fprintf(stderr, "  nodes=%lld complete=%d/%d rem=%d results=%d\n",
                 node_count, done, n - 1, total_rem, result_count);
     }
 
-    ForcedEntry forced[N_MAX * N_MAX];
+    int forced_base = forced_stack_top;
     int forced_count = 0;
     int contradiction = 0;
 
@@ -631,13 +634,15 @@ static void solve(void) {
                 int cmk = chi_mark();
                 int amk = adj_mark();
                 int omk = ord_mark();
-                forced[forced_count].p = p;
-                forced[forced_count].e = e;
-                forced[forced_count].cmk = cmk;
-                forced[forced_count].amk = amk;
-                forced[forced_count].omk = omk;
-                forced[forced_count].side = side;
+                int fi = forced_base + forced_count;
+                forced_stack[fi].p = p;
+                forced_stack[fi].e = e;
+                forced_stack[fi].cmk = cmk;
+                forced_stack[fi].amk = amk;
+                forced_stack[fi].omk = omk;
+                forced_stack[fi].side = side;
                 forced_count++;
+                forced_stack_top++;
                 int ok = side == 0 ? place_left(p, e) : place_right(p, e);
                 if (!ok) {
                     contradiction = 1;
@@ -718,14 +723,16 @@ static void solve(void) {
 
     /* Undo forced moves */
     for (int i = forced_count - 1; i >= 0; i--) {
-        if (forced[i].side == 0)
-            unplace_left(forced[i].p, forced[i].e);
+        int fi = forced_base + i;
+        if (forced_stack[fi].side == 0)
+            unplace_left(forced_stack[fi].p, forced_stack[fi].e);
         else
-            unplace_right(forced[i].p, forced[i].e);
-        chi_undo(forced[i].cmk);
-        adj_undo(forced[i].amk);
-        ord_undo(forced[i].omk);
+            unplace_right(forced_stack[fi].p, forced_stack[fi].e);
+        chi_undo(forced_stack[fi].cmk);
+        adj_undo(forced_stack[fi].amk);
+        ord_undo(forced_stack[fi].omk);
     }
+    forced_stack_top = forced_base;
 }
 
 /* ── generate ─────────────────────────────────────────────────── */
@@ -736,6 +743,7 @@ static int generate(int n, int max_results) {
     max_results_val = max_results;
     result_count = 0;
     node_count = 0;
+    forced_stack_top = 0;
 
     memset(chi_v, 0, sizeof(chi_v));
     chi_trail_len = 0;
@@ -796,11 +804,11 @@ static int generate(int n, int max_results) {
         left_len[p] = 2;
         right_arr[p][0] = last_el[p];
         right_len[p] = 1;
-        uint32_t mask = 0;
+        uint64_t mask = 0;
         for (int q = 1; q <= n; q++) {
             if (q == p || q == n || q == second_el[p] || q == last_el[p])
                 continue;
-            mask |= 1u << q;
+            mask |= 1ULL << q;
         }
         rem_mask[p] = mask;
     }
@@ -810,16 +818,16 @@ static int generate(int n, int max_results) {
     for (int p = 1; p < n && init_ok; p++) {
         int s = second_el[p], l = last_el[p];
         if (!chi_put(p, s, l, sgn[p][s] * sgn[p][l])) { init_ok = 0; break; }
-        uint32_t rmask = rem_mask[p];
-        uint32_t m2;
+        uint64_t rmask = rem_mask[p];
+        uint64_t m2;
         m2 = rmask;
         while (m2 && init_ok) {
-            int q = __builtin_ctz(m2); m2 &= m2 - 1;
+            int q = __builtin_ctzll(m2); m2 &= m2 - 1;
             if (!chi_put(p, s, q, sgn[p][s] * sgn[p][q])) init_ok = 0;
         }
         m2 = rmask;
         while (m2 && init_ok) {
-            int q = __builtin_ctz(m2); m2 &= m2 - 1;
+            int q = __builtin_ctzll(m2); m2 &= m2 - 1;
             if (!chi_put(p, q, l, sgn[p][q] * sgn[p][l])) init_ok = 0;
         }
     }
@@ -913,7 +921,7 @@ int main(int argc, char **argv) {
             }
 
             /* Triangle count */
-            uint32_t adj_bits[N_MAX+1][N_MAX+1];
+            uint64_t adj_bits[N_MAX+1][N_MAX+1];
             memset(adj_bits, 0, sizeof(adj_bits));
             for (int p = 1; p <= n; p++) {
                 int len = stored_hls_len[r][p];
@@ -921,17 +929,17 @@ int main(int argc, char **argv) {
                     int j = (i + 1) % len;
                     int a = stored_hls[r][p][i];
                     int b = stored_hls[r][p][j];
-                    adj_bits[p][a] |= 1u << b;
-                    adj_bits[p][b] |= 1u << a;
+                    adj_bits[p][a] |= 1ULL << b;
+                    adj_bits[p][b] |= 1ULL << a;
                 }
             }
             int tri = 0;
             for (int i = 1; i <= n; i++)
                 for (int j = i + 1; j <= n; j++)
                     for (int k = j + 1; k <= n; k++) {
-                        if ((adj_bits[i][j] & (1u << k)) &&
-                            (adj_bits[j][i] & (1u << k)) &&
-                            (adj_bits[k][i] & (1u << j)))
+                        if ((adj_bits[i][j] & (1ULL << k)) &&
+                            (adj_bits[j][i] & (1ULL << k)) &&
+                            (adj_bits[k][i] & (1ULL << j)))
                             tri++;
                     }
             printf("  Triangles (%d)\n", tri);
