@@ -14,6 +14,7 @@
 
 #include "common/input_parsing.h"
 #include "common/omatrix.h"
+#include "common/rotation_search.h"
 #include "common/solver_backend.h"
 #include "solver/custom_phase1_solver.h"
 #include "solver/highs_phase1_solver.h"
@@ -239,9 +240,7 @@ struct Options {
 
     long double eps = 1e-5L;
     long double margin = 1e-3L;
-    bool try_reflect = false;
-    bool euclidean_rotations = false;
-    bool projective_rotations = false;
+    RotationSearchConfig rot_cfg;
     bool print_sat_gens = false;
     bool print_sat_lines = false;
     std::string output_format = "full";
@@ -263,9 +262,9 @@ static void print_usage(const char* argv0) {
         << "  --axis K, -a K          Axis index K (default 0)\n"
         << "  --axis-eps E            Default 1e-5\n"
         << "  --margin M              Default 0.001\n"
-        << "  --try-reflect           Also try reflected O-matrix\n"
+        << "  --try-reflect, -r       Also try reflected O-matrix\n"
         << "  --euclidean-rotations, -e  Try all Euclidean O-matrix rotations\n"
-        << "  --projective-rotations, -p  Try identity plus all projective O-matrix rotations\n"
+        << "  --projective-rotations, -p  Try all projective rotations; implies -e\n"
         << "  --print-sat-gens        Filter mode: print generators for SAT cases\n"
         << "  --print-sat-lines       Filter mode: print line equations for SAT cases\n"
         << "  --output-format compact|full|json\n"
@@ -430,14 +429,7 @@ static AttemptResult run_attempt(
             return cand;
         };
 
-        OrderCandidate inc = solve_with_order(true);
-        OrderCandidate dec = solve_with_order(false);
-        auto better_candidate = [](const OrderCandidate& a, const OrderCandidate& b) {
-            if (a.feasible != b.feasible) return a.feasible;
-            if (a.t != b.t) return a.t < b.t;
-            return a.max_violation < b.max_violation;
-        };
-        const OrderCandidate& best = better_candidate(inc, dec) ? inc : dec;
+        const OrderCandidate& best = solve_with_order(true);
 
         res.t = best.t;
         res.max_violation = best.max_violation;
@@ -583,103 +575,26 @@ static AttemptResult solve_case(const std::vector<size_t>& gens, const Options& 
     if (base.n % 2 == 0) throw std::runtime_error("Only odd N supported (got even N)");
     if (opt.axis_k >= base.n) throw std::runtime_error("--axis out of range");
 
-    auto solve_for_omatrix = [&](const OMatrix& o, int projective_rotation) {
-        std::vector<AttemptResult> attempts;
-        attempts.push_back(run_attempt(o, gens, opt.axis_k, false, opt.eps, opt.margin, opt.tol, opt.m_order_delta, opt.solver_backend));
-        if (opt.try_reflect) {
-            attempts.push_back(run_attempt(o, gens, opt.axis_k, true, opt.eps, opt.margin, opt.tol, opt.m_order_delta, opt.solver_backend));
-        }
-
-        bool have_candidate = false;
-        AttemptResult best;
-        for (const auto& a : attempts) {
-            if (a.skipped_unrotatable) continue;
-            if (!have_candidate || better_attempt(a, best)) {
-                best = a;
-                have_candidate = true;
-            }
-        }
-
-        if (!have_candidate) {
-            AttemptResult no;
-            no.n = o.n;
-            no.gens_count = gens.size();
-            no.axis_input = opt.axis_k;
-            no.axis_used = no.axis_input;
-            no.rotation = 0;
-            no.reflected = false;
-            no.margin = opt.margin;
-            no.eps = opt.eps;
-            no.solver_backend = opt.solver_backend;
-            no.projective_rotation = projective_rotation;
-            no.feasible = false;
-            no.valid = false;
-            no.error = "SKIP_UNROTATABLE";
-            return no;
-        }
-
-        best.projective_rotation = projective_rotation;
-        return best;
-    };
-
-    auto solve_for_omatrix_with_euclidean = [&](const OMatrix& o, int projective_rotation) {
-        const int max_rotation = opt.euclidean_rotations ? 2 * (int)o.n : 1;
-        int tried_rotations = 0;
-        AttemptResult best;
-        bool have_best = false;
-        for (int rot = 0; rot < max_rotation; ++rot) {
-        OMatrix current;
-        if (!o.rotate(rot, current)) continue;
-        ++tried_rotations;
-        AttemptResult cur = solve_for_omatrix(current, projective_rotation);
-        cur.euclidean_rotation = rot;
-        cur.omatrix_gens = omatrix_to_generators(current);
-        if (!have_best || better_attempt(cur, best)) {
-            best = std::move(cur);
-            have_best = true;
-        }
-        }
-
-        if (!have_best) {
-            throw std::runtime_error("No valid Euclidean rotations available");
-        }
-        best.tried_euclidean_rotations = tried_rotations;
-        return best;
-    };
-
-    if (!opt.projective_rotations) {
-        AttemptResult single = solve_for_omatrix_with_euclidean(base, -1);
-        single.tried_projective_rotations = 1;
-        return single;
-    }
-
-    AttemptResult best;
-    bool have_best = false;
-    int tried_projective_rotations = 0;
-    int total_tried_euclidean = 0;
-    for (int p = -1; p < (int)base.n; ++p) {
-        OMatrix current;
-        if (p < 0) {
-            current = base;
-        } else if (!base.projective_rotate((size_t)p, current)) {
-            continue;
-        }
-        ++tried_projective_rotations;
-
-        AttemptResult cur = solve_for_omatrix_with_euclidean(current, p);
-        total_tried_euclidean += cur.tried_euclidean_rotations;
-        if (!have_best || better_attempt(cur, best)) {
-            best = std::move(cur);
-            have_best = true;
-        }
-    }
-
-    if (!have_best) {
-        throw std::runtime_error("No valid projective rotations available");
-    }
-    best.tried_projective_rotations = tried_projective_rotations;
-    best.tried_euclidean_rotations = total_tried_euclidean;
-    return best;
+    RotationStats rot_stats;
+    AttemptResult result = rotation_search<AttemptResult>(
+        base, opt.rot_cfg, rot_stats,
+        [&](const OMatrix& o, bool reflected, int eucl_rot, int proj_rot) {
+            // rotation_search already applied projective, reflect, euclidean.
+            // run_attempt does its own reflect+rotate for axis mapping,
+            // so we pass the pre-rotated o directly (reflected=false, axis_k as-is).
+            AttemptResult r = run_attempt(o, gens, opt.axis_k, false,
+                opt.eps, opt.margin, opt.tol, opt.m_order_delta, opt.solver_backend);
+            r.reflected = reflected;
+            r.euclidean_rotation = eucl_rot;
+            r.projective_rotation = proj_rot;
+            r.omatrix_gens = omatrix_to_generators(o);
+            return r;
+        },
+        better_attempt
+    );
+    result.tried_projective_rotations = rot_stats.tried_projective;
+    result.tried_euclidean_rotations = rot_stats.tried_euclidean;
+    return result;
 }
 
 int main(int argc, char** argv) {
@@ -726,17 +641,17 @@ int main(int argc, char** argv) {
                 opt.margin = std::stold(argv[++i]);
                 continue;
             }
-            if (arg == "--try-reflect") {
-                opt.try_reflect = true;
+            if (arg == "--try-reflect" || arg == "-r") {
+                opt.rot_cfg.try_reflect = true;
                 continue;
             }
             if (arg == "--euclidean-rotations" || arg == "-e") {
-                opt.euclidean_rotations = true;
+                opt.rot_cfg.euclidean_rotations = true;
                 continue;
             }
             if (arg == "--projective-rotations" || arg == "-p") {
-                opt.projective_rotations = true;
-                opt.euclidean_rotations = true;
+                opt.rot_cfg.projective_rotations = true;
+                opt.rot_cfg.euclidean_rotations = true;
                 continue;
             }
             if (arg == "--print-sat-gens") {
@@ -782,11 +697,10 @@ int main(int argc, char** argv) {
         }
 
         if (opt.filter_mode) {
-            auto cases = parse_filter_cases_from_stream(std::cin);
-            if (cases.empty()) throw std::runtime_error("No cases parsed from stdin");
-
+            FilterCaseStreamState state;
+            std::vector<size_t> gens;
             size_t idx = 0;
-            for (const auto& gens : cases) {
+            while (read_next_filter_case(std::cin, state, gens)) {
                 if (gens.empty()) continue;
                 ++idx;
                 try {
@@ -834,14 +748,15 @@ int main(int argc, char** argv) {
                     std::cout.flush();
                 }
             }
+            if (idx == 0) throw std::runtime_error("No cases parsed from stdin");
             return 0;
         }
 
         if (!opt.have_gens) throw std::runtime_error("No generators provided");
-        auto gens = parse_gens_numbers(opt.gens_str);
-        if (gens.empty()) throw std::runtime_error("No valid generator numbers parsed");
+        auto gens_parsed = parse_gens_numbers(opt.gens_str);
+        if (gens_parsed.empty()) throw std::runtime_error("No valid generator numbers parsed");
 
-        auto result = solve_case(gens, opt);
+        auto result = solve_case(gens_parsed, opt);
         const bool include_lines = !(opt.metadata_only && opt.filter_mode);
         print_result(result, opt.output_format, include_lines && opt.output_format == "full", 0);
         if (result.feasible && opt.print_sat_gens) {

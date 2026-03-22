@@ -1373,30 +1373,28 @@ int main(int argc, char** argv) {
     }
 
     if (!explicit_input && !isatty(STDIN_FILENO)) {
-        auto cases = parse_filter_cases_from_stream(std::cin);
-        if (!cases.empty()) {
-            for (size_t i = 0; i < cases.size(); ++i) {
-                const auto& gens_case = cases[i];
-                if (gens_case.empty()) {
-                    continue;
-                }
-                OMatrix o_case = make_omatrix(gens_case);
-                if (print_o_matrix) {
-                    std::cout << "#O_MATRIX_BEGIN #" << (i + 1) << "\n";
-                    print_omatrix(std::cout, o_case);
-                    std::cout << "#O_MATRIX_END #" << (i + 1) << "\n";
-                }
-                try {
-                    Terms terms_case{o_case, axis_mode};
-                    auto res = solve_for_filter(terms_case, max_steps_limit, unlimited_steps, step);
-                    print_filter_case_line(res, i, gens_case, metadata_only);
-                } catch (const std::exception& e) {
-                    std::cerr << "Axis mode error on case #" << (i + 1) << ": " << e.what() << "\n";
-                    return 2;
-                }
+        FilterCaseStreamState filter_state;
+        std::vector<size_t> gens_case;
+        size_t case_index = 0;
+        while (read_next_filter_case(std::cin, filter_state, gens_case)) {
+            if (gens_case.empty()) continue;
+            ++case_index;
+            OMatrix o_case = make_omatrix(gens_case);
+            if (print_o_matrix) {
+                std::cout << "#O_MATRIX_BEGIN #" << case_index << "\n";
+                print_omatrix(std::cout, o_case);
+                std::cout << "#O_MATRIX_END #" << case_index << "\n";
             }
-            return 0;
+            try {
+                Terms terms_case{o_case, axis_mode};
+                auto res = solve_for_filter(terms_case, max_steps_limit, unlimited_steps, step);
+                print_filter_case_line(res, case_index - 1, gens_case, metadata_only);
+            } catch (const std::exception& e) {
+                std::cerr << "Axis mode error on case #" << case_index << ": " << e.what() << "\n";
+                return 2;
+            }
         }
+        if (case_index > 0) return 0;
     }
 
     auto gens = parse_gens_numbers(gens_str);
