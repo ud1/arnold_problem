@@ -31,6 +31,7 @@ static void print_usage(const char* argv0) {
         << "  --axis-pair I,J enables fixed-slope axis mode for adjacent lines I and J.\n"
         << "  --axis-pair without I,J fixes boundary lines 0 and n-1 near vertical.\n"
         << "  --hyperbolic-axis fixes line 0 as x=0 and fixes b_i as in hyperbolic_axis.\n"
+        << "  In dedicated axis tools, --projective-rotations now means identity plus all projective rotations.\n"
         << "  --axis-eps E sets axis half-gap in angle space (default: 0.0001).\n"
         << "  --min-angle A sets the angle-margin penalty threshold in slope-space (default: 0.01).\n"
         << "  --require-margin treats SAT as success only when margin checks pass.\n"

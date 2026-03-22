@@ -8,6 +8,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <signal.h>
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -252,6 +253,7 @@ struct Options {
     long double tol = 1e-10L;
     long double m_order_delta = 1e-4L;
     BackendKind solver_backend = BackendKind::Highs;
+    int fork_override = -1; // -1 = auto, 0 = no-fork, 1 = force fork
 };
 
 static void print_usage(const char* argv0) {
@@ -267,12 +269,14 @@ static void print_usage(const char* argv0) {
         << "  --margin M              Default 0.001\n"
         << "  --try-reflect           Also try reflected O-matrix\n"
         << "  --euclidean-rotations, -e  Try all Euclidean O-matrix rotations\n"
-        << "  --projective-rotations, -p  Try all projective O-matrix rotations\n"
+        << "  --projective-rotations, -p  Try identity plus all projective O-matrix rotations\n"
         << "  --print-sat-gens        Filter mode: print generators for SAT cases\n"
         << "  --print-sat-lines       Filter mode: print line equations for SAT cases\n"
         << "  --output-format compact|full|json\n"
         << "  --metadata-only         Filter mode: diagnostics only\n"
-        << "  --solver highs|custom|both (default highs)\n";
+        << "  --solver highs|custom|both (default highs)\n"
+        << "  --no-fork               Disable fork() isolation in filter mode (auto for highs)\n"
+        << "  --fork                  Force fork() isolation even with highs backend\n";
 }
 
 struct AttemptResult {
@@ -658,12 +662,18 @@ static AttemptResult solve_case(const std::vector<size_t>& gens, const Options& 
     AttemptResult best;
     bool have_best = false;
     int tried_projective_rotations = 0;
-    for (size_t p = 0; p < base.n; ++p) {
+    int total_tried_euclidean = 0;
+    for (int p = -1; p < (int)base.n; ++p) {
         OMatrix current;
-        if (!base.projective_rotate(p, current)) continue;
+        if (p < 0) {
+            current = base;
+        } else if (!base.projective_rotate((size_t)p, current)) {
+            continue;
+        }
         ++tried_projective_rotations;
 
-        AttemptResult cur = solve_for_omatrix_with_euclidean(current, (int)p);
+        AttemptResult cur = solve_for_omatrix_with_euclidean(current, p);
+        total_tried_euclidean += cur.tried_euclidean_rotations;
         if (!have_best || better_attempt(cur, best)) {
             best = std::move(cur);
             have_best = true;
@@ -674,6 +684,7 @@ static AttemptResult solve_case(const std::vector<size_t>& gens, const Options& 
         throw std::runtime_error("No valid projective rotations available");
     }
     best.tried_projective_rotations = tried_projective_rotations;
+    best.tried_euclidean_rotations = total_tried_euclidean;
     return best;
 }
 
@@ -759,6 +770,14 @@ int main(int argc, char** argv) {
                 opt.solver_backend = parse_backend_kind(argv[++i]);
                 continue;
             }
+            if (arg == "--no-fork") {
+                opt.fork_override = 0;
+                continue;
+            }
+            if (arg == "--fork") {
+                opt.fork_override = 1;
+                continue;
+            }
             if (!arg.empty() && arg[0] != '-') {
                 std::ostringstream ss;
                 ss << arg;
@@ -777,6 +796,16 @@ int main(int argc, char** argv) {
         }
 
         if (opt.filter_mode) {
+            // fork is incompatible with HiGHS: libhighs uses a global
+            // thread pool (HighsTaskExecutor) that cannot survive fork().
+            // Default: in-process for highs/both, fork for custom only.
+            bool use_fork;
+            if (opt.fork_override >= 0) {
+                use_fork = (opt.fork_override == 1);
+            } else {
+                use_fork = (opt.solver_backend == BackendKind::Custom);
+            }
+
             auto cases = parse_filter_cases_from_stream(std::cin);
             if (cases.empty()) throw std::runtime_error("No cases parsed from stdin");
 
@@ -784,62 +813,109 @@ int main(int argc, char** argv) {
             for (const auto& gens : cases) {
                 if (gens.empty()) continue;
                 ++idx;
-                pid_t pid = fork();
-                if (pid < 0) {
-                    throw std::runtime_error("fork() failed in filter mode");
-                }
 
-                if (pid == 0) {
-                    int devnull = open("/dev/null", O_WRONLY);
-                    if (devnull >= 0) {
-                        (void)dup2(devnull, STDERR_FILENO);
-                        close(devnull);
-                    }
-                    try {
-                        auto result = solve_case(gens, opt);
-                        std::cout << (result.feasible ? "SAT" : "NO_SOLUTION")
-                                  << " #" << idx
-                                  << " n=" << result.n
-                                  << " gens=" << result.gens_count
-                                  << " eucl_rot=" << result.euclidean_rotation << "/" << result.tried_euclidean_rotations
-                                  << " proj_rot=" << result.projective_rotation << "/" << result.tried_projective_rotations
-                                  << " margin=" << std::setprecision(21) << result.margin
-                                  << " t=" << result.t
-                                  << " worst_raw=" << result.worst_raw
-                                  << " solver=" << backend_kind_name(result.solver_backend);
-                        if (!result.error.empty()) std::cout << " error=" << result.error;
-                        std::cout << "\n";
-                        if (result.feasible && opt.print_sat_lines &&
-                            result.m_orig.size() == result.n && result.b_orig.size() == result.n) {
-                            std::vector<long double> output_m;
-                            std::vector<long double> output_b;
-                            if (build_output_lines_swapped_xy(result, output_m, output_b)) {
-                                std::cout << "#LINES_BEGIN #" << idx << "\n";
-                                std::cout << "m,b\n";
-                                for (size_t i = 0; i < result.n; ++i) {
-                                    std::cout << output_m[i] << "," << output_b[i] << "\n";
-                                }
-                                std::cout << "#LINES_END #" << idx << "\n";
+                auto run_case = [&]() {
+                    auto result = solve_case(gens, opt);
+                    std::cout << (result.feasible ? "SAT" : "NO_SOLUTION")
+                              << " #" << idx
+                              << " n=" << result.n
+                              << " gens=" << result.gens_count
+                              << " eucl_rot=" << result.euclidean_rotation << "/" << result.tried_euclidean_rotations
+                              << " proj_rot=" << result.projective_rotation << "/" << result.tried_projective_rotations
+                              << " margin=" << std::setprecision(21) << result.margin
+                              << " t=" << result.t
+                              << " worst_raw=" << result.worst_raw
+                              << " solver=" << backend_kind_name(result.solver_backend);
+                    if (!result.error.empty()) std::cout << " error=" << result.error;
+                    std::cout << "\n";
+                    if (result.feasible && opt.print_sat_lines &&
+                        result.m_orig.size() == result.n && result.b_orig.size() == result.n) {
+                        std::vector<long double> output_m;
+                        std::vector<long double> output_b;
+                        if (build_output_lines_swapped_xy(result, output_m, output_b)) {
+                            std::cout << "#LINES_BEGIN #" << idx << "\n";
+                            std::cout << "m,b\n";
+                            for (size_t i = 0; i < result.n; ++i) {
+                                std::cout << output_m[i] << "," << output_b[i] << "\n";
                             }
+                            std::cout << "#LINES_END #" << idx << "\n";
                         }
-                        if (result.feasible && opt.print_sat_gens) {
-                            print_generators_line(result.omatrix_gens, "GENS #" + std::to_string(idx));
-                        }
-                        std::cout.flush();
-                        _exit(0);
+                    }
+                    if (result.feasible && opt.print_sat_gens) {
+                        print_generators_line(result.omatrix_gens, "GENS #" + std::to_string(idx));
+                    }
+                    std::cout.flush();
+                };
+
+                if (!use_fork) {
+                    // In-process: catch exceptions, no fork
+                    try {
+                        run_case();
                     } catch (const std::exception& e) {
                         std::cout << "ERROR"
                                   << " #" << idx
                                   << " message=" << e.what()
                                   << "\n";
                         std::cout.flush();
-                        _exit(0);
+                    } catch (...) {
+                        std::cout << "ERROR"
+                                  << " #" << idx
+                                  << " message=unknown exception"
+                                  << "\n";
+                        std::cout.flush();
                     }
-                }
+                } else {
+                    // Fork-isolated execution
+                    pid_t pid = fork();
+                    if (pid < 0) {
+                        throw std::runtime_error("fork() failed in filter mode");
+                    }
 
-                int status = 0;
-                if (waitpid(pid, &status, 0) < 0) {
-                    throw std::runtime_error("waitpid() failed in filter mode");
+                    if (pid == 0) {
+                        int devnull = open("/dev/null", O_WRONLY);
+                        if (devnull >= 0) {
+                            (void)dup2(devnull, STDERR_FILENO);
+                            close(devnull);
+                        }
+                        try {
+                            run_case();
+                            _exit(0);
+                        } catch (const std::exception& e) {
+                            std::cout << "ERROR"
+                                      << " #" << idx
+                                      << " message=" << e.what()
+                                      << "\n";
+                            std::cout.flush();
+                            _exit(0);
+                        } catch (...) {
+                            std::cout << "ERROR"
+                                      << " #" << idx
+                                      << " message=unknown exception"
+                                      << "\n";
+                            std::cout.flush();
+                            _exit(0);
+                        }
+                    }
+
+                    int status = 0;
+                    if (waitpid(pid, &status, 0) < 0) {
+                        throw std::runtime_error("waitpid() failed in filter mode");
+                    }
+                    if (WIFSIGNALED(status)) {
+                        std::cout << "ERROR"
+                                  << " #" << idx
+                                  << " signal=" << WTERMSIG(status)
+                                  << "\n";
+                        std::cout.flush();
+                        continue;
+                    }
+                    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                        std::cout << "ERROR"
+                                  << " #" << idx
+                                  << " exit_status=" << WEXITSTATUS(status)
+                                  << "\n";
+                        std::cout.flush();
+                    }
                 }
             }
             return 0;

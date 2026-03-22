@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
+#include <signal.h>
 
 #include "common/input_parsing.h"
 #include "common/omatrix.h"
@@ -387,11 +388,12 @@ static AttemptResult solve_case_with_projective_and_rotations(
     AttemptResult best;
     bool have_best = false;
 
+    const int projective_start = projective_rotations ? -1 : 0;
     const int projective_count = projective_rotations ? (int)base.n : 1;
-    for (int s = 0; s < projective_count; ++s) {
+    for (int s = projective_start; s < projective_count; ++s) {
         OMatrix current_base;
         int projective_tag = -1;
-        if (projective_rotations) {
+        if (projective_rotations && s >= 0) {
             if (!base.projective_rotate((size_t)s, current_base)) continue;
             if (!validate_omatrix(current_base, true)) continue;
             projective_tag = s;
@@ -475,7 +477,85 @@ static void print_lines_csv_block(const std::vector<long double>& m, const std::
     std::cout << "#LINES_END\n";
 }
 
-static void process_filter_case(
+static void print_filter_result(
+    const AttemptResult& res,
+    const std::vector<size_t>& gens,
+    size_t case_index,
+    int tried_projective_rotations,
+    int tried_plane_rotations,
+    bool print_gens,
+    bool print_sat_gens,
+    bool print_sat_lines
+) {
+    std::cout << (res.sat ? "SAT" : "NO_SOLUTION")
+              << " #" << case_index
+              << " n=" << res.n
+              << " gens=" << gens.size()
+              << " reflected=" << (res.reflected ? 1 : 0)
+              << " eucl_rot=" << res.rotation << "/" << tried_plane_rotations
+              << " proj_rot=" << res.projective_rotation << "/" << tried_projective_rotations
+              << " margin=" << std::setprecision(21) << (double)res.margin
+              << " worst_raw=" << std::setprecision(18) << (double)res.worst_raw
+              << " t=" << (double)res.t
+              << " solver=" << backend_kind_name(res.solver_backend)
+              << "\n";
+    if (res.sat && print_sat_lines) {
+        std::cout << "#LINES_BEGIN #" << case_index << "\n";
+        std::cout << "m,b\n";
+        for (size_t i = 0; i < res.m.size() && i < res.b.size(); ++i) {
+            std::cout << (double)res.m[i] << "," << (double)res.b[i] << "\n";
+        }
+        std::cout << "#LINES_END #" << case_index << "\n";
+    }
+    if (res.sat && print_sat_gens) {
+        print_generators_line(res.omatrix_gens, "GENS #" + std::to_string(case_index));
+    }
+    if (print_gens) {
+        print_generators_line(res.omatrix_gens, "GENS #" + std::to_string(case_index));
+    }
+    std::cout.flush();
+}
+
+static void process_filter_case_inprocess(
+    const std::vector<size_t>& gens,
+    size_t case_index,
+    const AxisModeConfig& axis,
+    long double strict_margin,
+    bool all_rotations,
+    bool projective_rotations,
+    bool try_reflect,
+    bool print_gens,
+    bool print_sat_gens,
+    bool print_sat_lines,
+    const SolveParams& solve_params
+) {
+    try {
+        OMatrix o = make_omatrix(gens);
+        int tried_projective_rotations = 0;
+        int tried_plane_rotations = 0;
+        AttemptResult res = solve_case_with_projective_and_rotations(
+            o, gens.size(), axis, strict_margin, try_reflect, all_rotations, projective_rotations,
+            tried_projective_rotations, tried_plane_rotations, solve_params
+        );
+        print_filter_result(res, gens, case_index,
+            tried_projective_rotations, tried_plane_rotations,
+            print_gens, print_sat_gens, print_sat_lines);
+    } catch (const std::exception& e) {
+        std::cout << "ERROR"
+                  << " #" << case_index
+                  << " message=" << e.what()
+                  << "\n";
+        std::cout.flush();
+    } catch (...) {
+        std::cout << "ERROR"
+                  << " #" << case_index
+                  << " message=unknown exception"
+                  << "\n";
+        std::cout.flush();
+    }
+}
+
+static void process_filter_case_fork(
     const std::vector<size_t>& gens,
     size_t case_index,
     const AxisModeConfig& axis,
@@ -507,39 +587,21 @@ static void process_filter_case(
                 o, gens.size(), axis, strict_margin, try_reflect, all_rotations, projective_rotations,
                 tried_projective_rotations, tried_plane_rotations, solve_params
             );
-
-            std::cout << (res.sat ? "SAT" : "NO_SOLUTION")
-                      << " #" << case_index
-                      << " n=" << res.n
-                      << " gens=" << gens.size()
-                      << " reflected=" << (res.reflected ? 1 : 0)
-                      << " eucl_rot=" << res.rotation << "/" << tried_plane_rotations
-                      << " proj_rot=" << res.projective_rotation << "/" << tried_projective_rotations
-                      << " margin=" << std::setprecision(21) << (double)res.margin
-                      << " worst_raw=" << std::setprecision(18) << (double)res.worst_raw
-                      << " t=" << (double)res.t
-                      << " solver=" << backend_kind_name(res.solver_backend)
-                      << "\n";
-            if (res.sat && print_sat_lines) {
-                std::cout << "#LINES_BEGIN #" << case_index << "\n";
-                std::cout << "m,b\n";
-                for (size_t i = 0; i < res.m.size() && i < res.b.size(); ++i) {
-                    std::cout << (double)res.m[i] << "," << (double)res.b[i] << "\n";
-                }
-                std::cout << "#LINES_END #" << case_index << "\n";
-            }
-            if (res.sat && print_sat_gens) {
-                print_generators_line(res.omatrix_gens, "GENS #" + std::to_string(case_index));
-            }
-            if (print_gens) {
-                print_generators_line(res.omatrix_gens, "GENS #" + std::to_string(case_index));
-            }
-            std::cout.flush();
+            print_filter_result(res, gens, case_index,
+                tried_projective_rotations, tried_plane_rotations,
+                print_gens, print_sat_gens, print_sat_lines);
             _exit(0);
         } catch (const std::exception& e) {
             std::cout << "ERROR"
                       << " #" << case_index
                       << " message=" << e.what()
+                      << "\n";
+            std::cout.flush();
+            _exit(0);
+        } catch (...) {
+            std::cout << "ERROR"
+                      << " #" << case_index
+                      << " message=unknown exception"
                       << "\n";
             std::cout.flush();
             _exit(0);
@@ -549,6 +611,46 @@ static void process_filter_case(
     int status = 0;
     if (waitpid(pid, &status, 0) < 0) {
         throw std::runtime_error("waitpid() failed in filter mode");
+    }
+    if (WIFSIGNALED(status)) {
+        std::cout << "ERROR"
+                  << " #" << case_index
+                  << " signal=" << WTERMSIG(status)
+                  << "\n";
+        std::cout.flush();
+        return;
+    }
+    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+        std::cout << "ERROR"
+                  << " #" << case_index
+                  << " exit_status=" << WEXITSTATUS(status)
+                  << "\n";
+        std::cout.flush();
+    }
+}
+
+static void process_filter_case(
+    const std::vector<size_t>& gens,
+    size_t case_index,
+    const AxisModeConfig& axis,
+    long double strict_margin,
+    bool all_rotations,
+    bool projective_rotations,
+    bool try_reflect,
+    bool print_gens,
+    bool print_sat_gens,
+    bool print_sat_lines,
+    const SolveParams& solve_params,
+    bool use_fork
+) {
+    if (use_fork) {
+        process_filter_case_fork(gens, case_index, axis, strict_margin,
+            all_rotations, projective_rotations, try_reflect,
+            print_gens, print_sat_gens, print_sat_lines, solve_params);
+    } else {
+        process_filter_case_inprocess(gens, case_index, axis, strict_margin,
+            all_rotations, projective_rotations, try_reflect,
+            print_gens, print_sat_gens, print_sat_lines, solve_params);
     }
 }
 
@@ -565,11 +667,13 @@ static void print_usage(const char* argv0) {
         << "  --margin M: strict margin target (default 1.0)\n"
         << "  --try-reflect: also try reflected O-matrix\n"
         << "  --euclidean-rotations, -e: iterate all valid O-matrix plane rotations\n"
-        << "  --projective-rotations, -p: iterate projective rotations; implies --euclidean-rotations\n"
+        << "  --projective-rotations, -p: iterate identity plus all projective rotations; implies --euclidean-rotations\n"
         << "  --print-gens: print generators for the O-matrix used to produce LINES\n"
         << "  --print-sat-gens: in filter mode, print generators only for SAT cases\n"
         << "  --print-sat-lines: in filter mode, print line equations only for SAT cases\n"
-        << "  --solver highs|custom|both: LP backend (default highs)\n";
+        << "  --solver highs|custom|both: LP backend (default highs)\n"
+        << "  --no-fork: disable fork() isolation in filter mode (auto for highs backend)\n"
+        << "  --fork: force fork() isolation even with highs backend\n";
 }
 
 int main(int argc, char** argv) {
@@ -588,6 +692,7 @@ int main(int argc, char** argv) {
         bool print_sat_lines = false;
         SolveParams solve_params;
         long double strict_margin = 1.0L;
+        int fork_override = -1; // -1 = auto, 0 = no-fork, 1 = force fork
 
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
@@ -665,6 +770,14 @@ int main(int argc, char** argv) {
                 solve_params.backend = parse_backend_kind(argv[++i]);
                 continue;
             }
+            if (arg == "--no-fork") {
+                fork_override = 0;
+                continue;
+            }
+            if (arg == "--fork") {
+                fork_override = 1;
+                continue;
+            }
             if (!arg.empty() && arg[0] != '-') {
                 std::ostringstream ss;
                 ss << arg;
@@ -694,6 +807,16 @@ int main(int argc, char** argv) {
         }
 
         if (filter_mode) {
+            // fork is incompatible with HiGHS: libhighs uses a global
+            // thread pool (HighsTaskExecutor) that cannot survive fork().
+            // Default: in-process for highs/both, fork for custom only.
+            bool use_fork;
+            if (fork_override >= 0) {
+                use_fork = (fork_override == 1);
+            } else {
+                use_fork = (solve_params.backend == BackendKind::Custom);
+            }
+
             FilterCaseStreamState state;
             std::vector<size_t> gens;
             size_t case_index = 0;
@@ -702,7 +825,7 @@ int main(int argc, char** argv) {
                 ++case_index;
                 process_filter_case(
                     gens, case_index, axis, strict_margin, all_rotations, projective_rotations, try_reflect,
-                    print_gens, print_sat_gens, print_sat_lines, solve_params
+                    print_gens, print_sat_gens, print_sat_lines, solve_params, use_fork
                 );
             }
             if (case_index == 0) throw std::runtime_error("No cases parsed from stdin");

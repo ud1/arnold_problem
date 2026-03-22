@@ -21,6 +21,19 @@ struct Result {
     std::vector<long double> x;
 };
 
+// Persistent HiGHS instance — created once, reused across solves.
+// Avoids repeated creation/destruction of the global thread-pool
+// scheduler that Highs_lpCall does (resetGlobalScheduler each call),
+// which causes heap corruption ("double free") on long runs.
+static void* g_highs = nullptr;
+
+static inline void ensure_highs() {
+    if (!g_highs) {
+        g_highs = Highs_create();
+        Highs_setBoolOptionValue(g_highs, "output_flag", 0);
+    }
+}
+
 static inline Result solve(const std::vector<std::vector<long double>>& A, const std::vector<long double>& rhs, long double tol) {
     Result out;
 
@@ -34,6 +47,8 @@ static inline Result solve(const std::vector<std::vector<long double>>& A, const
         out.x.assign(d, 0.0L);
         return out;
     }
+
+    ensure_highs();
 
     const double inf = 1.0e30;
     const size_t t_col = d;
@@ -69,12 +84,9 @@ static inline Result solve(const std::vector<std::vector<long double>>& A, const
     }
     a_start[m] = (HighsInt)a_index.size();
 
-    std::vector<double> col_value(num_vars, 0.0), col_dual(num_vars, 0.0);
-    std::vector<double> row_value(m, 0.0), row_dual(m, 0.0);
-    std::vector<HighsInt> col_basis_status(num_vars, 0), row_basis_status(m, 0);
-
-    HighsInt model_status = kHighsModelStatusNotset;
-    HighsInt run_status = Highs_lpCall(
+    // Pass LP to persistent instance (replaces any previous model)
+    HighsInt pass_status = Highs_passLp(
+        g_highs,
         num_col,
         num_row,
         (HighsInt)a_index.size(),
@@ -84,19 +96,27 @@ static inline Result solve(const std::vector<std::vector<long double>>& A, const
         col_cost.data(),
         col_lower.data(),
         col_upper.data(),
-        m ? row_lower.data() : nullptr,
-        m ? row_upper.data() : nullptr,
-        m ? a_start.data() : nullptr,
-        a_index.empty() ? nullptr : a_index.data(),
-        a_value.empty() ? nullptr : a_value.data(),
-        col_value.data(),
-        col_dual.data(),
-        m ? row_value.data() : nullptr,
-        m ? row_dual.data() : nullptr,
-        col_basis_status.data(),
-        m ? row_basis_status.data() : nullptr,
-        &model_status
+        row_lower.data(),
+        row_upper.data(),
+        a_start.data(),
+        a_index.data(),
+        a_value.data()
     );
+
+    if (pass_status == kHighsStatusError) {
+        out.x.assign(d, 0.0L);
+        return out;
+    }
+
+    HighsInt run_status = Highs_run(g_highs);
+    HighsInt model_status = Highs_getModelStatus(g_highs);
+
+    std::vector<double> col_value(num_vars, 0.0);
+    std::vector<double> row_value(m, 0.0);
+    Highs_getSolution(g_highs, col_value.data(), nullptr, row_value.data(), nullptr);
+
+    // Clear model data but keep the instance and scheduler alive
+    Highs_clearModel(g_highs);
 
     out.x.assign(d, 0.0L);
     for (size_t j = 0; j < d; ++j) out.x[j] = (long double)col_value[j];
