@@ -8,9 +8,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <signal.h>
-#include <sys/wait.h>
-#include <fcntl.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -253,7 +250,6 @@ struct Options {
     long double tol = 1e-10L;
     long double m_order_delta = 1e-4L;
     BackendKind solver_backend = BackendKind::Highs;
-    int fork_override = -1; // -1 = auto, 0 = no-fork, 1 = force fork
 };
 
 static void print_usage(const char* argv0) {
@@ -274,9 +270,7 @@ static void print_usage(const char* argv0) {
         << "  --print-sat-lines       Filter mode: print line equations for SAT cases\n"
         << "  --output-format compact|full|json\n"
         << "  --metadata-only         Filter mode: diagnostics only\n"
-        << "  --solver highs|custom|both (default highs)\n"
-        << "  --no-fork               Disable fork() isolation in filter mode (auto for highs)\n"
-        << "  --fork                  Force fork() isolation even with highs backend\n";
+        << "  --solver highs|custom|both (default highs)\n";
 }
 
 struct AttemptResult {
@@ -770,14 +764,6 @@ int main(int argc, char** argv) {
                 opt.solver_backend = parse_backend_kind(argv[++i]);
                 continue;
             }
-            if (arg == "--no-fork") {
-                opt.fork_override = 0;
-                continue;
-            }
-            if (arg == "--fork") {
-                opt.fork_override = 1;
-                continue;
-            }
             if (!arg.empty() && arg[0] != '-') {
                 std::ostringstream ss;
                 ss << arg;
@@ -796,16 +782,6 @@ int main(int argc, char** argv) {
         }
 
         if (opt.filter_mode) {
-            // fork is incompatible with HiGHS: libhighs uses a global
-            // thread pool (HighsTaskExecutor) that cannot survive fork().
-            // Default: in-process for highs/both, fork for custom only.
-            bool use_fork;
-            if (opt.fork_override >= 0) {
-                use_fork = (opt.fork_override == 1);
-            } else {
-                use_fork = (opt.solver_backend == BackendKind::Custom);
-            }
-
             auto cases = parse_filter_cases_from_stream(std::cin);
             if (cases.empty()) throw std::runtime_error("No cases parsed from stdin");
 
@@ -813,8 +789,7 @@ int main(int argc, char** argv) {
             for (const auto& gens : cases) {
                 if (gens.empty()) continue;
                 ++idx;
-
-                auto run_case = [&]() {
+                try {
                     auto result = solve_case(gens, opt);
                     std::cout << (result.feasible ? "SAT" : "NO_SOLUTION")
                               << " #" << idx
@@ -845,77 +820,18 @@ int main(int argc, char** argv) {
                         print_generators_line(result.omatrix_gens, "GENS #" + std::to_string(idx));
                     }
                     std::cout.flush();
-                };
-
-                if (!use_fork) {
-                    // In-process: catch exceptions, no fork
-                    try {
-                        run_case();
-                    } catch (const std::exception& e) {
-                        std::cout << "ERROR"
-                                  << " #" << idx
-                                  << " message=" << e.what()
-                                  << "\n";
-                        std::cout.flush();
-                    } catch (...) {
-                        std::cout << "ERROR"
-                                  << " #" << idx
-                                  << " message=unknown exception"
-                                  << "\n";
-                        std::cout.flush();
-                    }
-                } else {
-                    // Fork-isolated execution
-                    pid_t pid = fork();
-                    if (pid < 0) {
-                        throw std::runtime_error("fork() failed in filter mode");
-                    }
-
-                    if (pid == 0) {
-                        int devnull = open("/dev/null", O_WRONLY);
-                        if (devnull >= 0) {
-                            (void)dup2(devnull, STDERR_FILENO);
-                            close(devnull);
-                        }
-                        try {
-                            run_case();
-                            _exit(0);
-                        } catch (const std::exception& e) {
-                            std::cout << "ERROR"
-                                      << " #" << idx
-                                      << " message=" << e.what()
-                                      << "\n";
-                            std::cout.flush();
-                            _exit(0);
-                        } catch (...) {
-                            std::cout << "ERROR"
-                                      << " #" << idx
-                                      << " message=unknown exception"
-                                      << "\n";
-                            std::cout.flush();
-                            _exit(0);
-                        }
-                    }
-
-                    int status = 0;
-                    if (waitpid(pid, &status, 0) < 0) {
-                        throw std::runtime_error("waitpid() failed in filter mode");
-                    }
-                    if (WIFSIGNALED(status)) {
-                        std::cout << "ERROR"
-                                  << " #" << idx
-                                  << " signal=" << WTERMSIG(status)
-                                  << "\n";
-                        std::cout.flush();
-                        continue;
-                    }
-                    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-                        std::cout << "ERROR"
-                                  << " #" << idx
-                                  << " exit_status=" << WEXITSTATUS(status)
-                                  << "\n";
-                        std::cout.flush();
-                    }
+                } catch (const std::exception& e) {
+                    std::cout << "ERROR"
+                              << " #" << idx
+                              << " message=" << e.what()
+                              << "\n";
+                    std::cout.flush();
+                } catch (...) {
+                    std::cout << "ERROR"
+                              << " #" << idx
+                              << " message=unknown exception"
+                              << "\n";
+                    std::cout.flush();
                 }
             }
             return 0;

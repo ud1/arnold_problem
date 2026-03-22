@@ -6,14 +6,11 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
-#include <fcntl.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
-#include <signal.h>
 
 #include "common/input_parsing.h"
 #include "common/omatrix.h"
@@ -516,7 +513,7 @@ static void print_filter_result(
     std::cout.flush();
 }
 
-static void process_filter_case_inprocess(
+static void process_filter_case(
     const std::vector<size_t>& gens,
     size_t case_index,
     const AxisModeConfig& axis,
@@ -555,105 +552,6 @@ static void process_filter_case_inprocess(
     }
 }
 
-static void process_filter_case_fork(
-    const std::vector<size_t>& gens,
-    size_t case_index,
-    const AxisModeConfig& axis,
-    long double strict_margin,
-    bool all_rotations,
-    bool projective_rotations,
-    bool try_reflect,
-    bool print_gens,
-    bool print_sat_gens,
-    bool print_sat_lines,
-    const SolveParams& solve_params
-) {
-    pid_t pid = fork();
-    if (pid < 0) {
-        throw std::runtime_error("fork() failed in filter mode");
-    }
-
-    if (pid == 0) {
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) {
-            (void)dup2(devnull, STDERR_FILENO);
-            close(devnull);
-        }
-        try {
-            OMatrix o = make_omatrix(gens);
-            int tried_projective_rotations = 0;
-            int tried_plane_rotations = 0;
-            AttemptResult res = solve_case_with_projective_and_rotations(
-                o, gens.size(), axis, strict_margin, try_reflect, all_rotations, projective_rotations,
-                tried_projective_rotations, tried_plane_rotations, solve_params
-            );
-            print_filter_result(res, gens, case_index,
-                tried_projective_rotations, tried_plane_rotations,
-                print_gens, print_sat_gens, print_sat_lines);
-            _exit(0);
-        } catch (const std::exception& e) {
-            std::cout << "ERROR"
-                      << " #" << case_index
-                      << " message=" << e.what()
-                      << "\n";
-            std::cout.flush();
-            _exit(0);
-        } catch (...) {
-            std::cout << "ERROR"
-                      << " #" << case_index
-                      << " message=unknown exception"
-                      << "\n";
-            std::cout.flush();
-            _exit(0);
-        }
-    }
-
-    int status = 0;
-    if (waitpid(pid, &status, 0) < 0) {
-        throw std::runtime_error("waitpid() failed in filter mode");
-    }
-    if (WIFSIGNALED(status)) {
-        std::cout << "ERROR"
-                  << " #" << case_index
-                  << " signal=" << WTERMSIG(status)
-                  << "\n";
-        std::cout.flush();
-        return;
-    }
-    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-        std::cout << "ERROR"
-                  << " #" << case_index
-                  << " exit_status=" << WEXITSTATUS(status)
-                  << "\n";
-        std::cout.flush();
-    }
-}
-
-static void process_filter_case(
-    const std::vector<size_t>& gens,
-    size_t case_index,
-    const AxisModeConfig& axis,
-    long double strict_margin,
-    bool all_rotations,
-    bool projective_rotations,
-    bool try_reflect,
-    bool print_gens,
-    bool print_sat_gens,
-    bool print_sat_lines,
-    const SolveParams& solve_params,
-    bool use_fork
-) {
-    if (use_fork) {
-        process_filter_case_fork(gens, case_index, axis, strict_margin,
-            all_rotations, projective_rotations, try_reflect,
-            print_gens, print_sat_gens, print_sat_lines, solve_params);
-    } else {
-        process_filter_case_inprocess(gens, case_index, axis, strict_margin,
-            all_rotations, projective_rotations, try_reflect,
-            print_gens, print_sat_gens, print_sat_lines, solve_params);
-    }
-}
-
 static void print_usage(const char* argv0) {
     std::cerr
         << "Usage:\n"
@@ -671,9 +569,7 @@ static void print_usage(const char* argv0) {
         << "  --print-gens: print generators for the O-matrix used to produce LINES\n"
         << "  --print-sat-gens: in filter mode, print generators only for SAT cases\n"
         << "  --print-sat-lines: in filter mode, print line equations only for SAT cases\n"
-        << "  --solver highs|custom|both: LP backend (default highs)\n"
-        << "  --no-fork: disable fork() isolation in filter mode (auto for highs backend)\n"
-        << "  --fork: force fork() isolation even with highs backend\n";
+        << "  --solver highs|custom|both: LP backend (default highs)\n";
 }
 
 int main(int argc, char** argv) {
@@ -692,8 +588,6 @@ int main(int argc, char** argv) {
         bool print_sat_lines = false;
         SolveParams solve_params;
         long double strict_margin = 1.0L;
-        int fork_override = -1; // -1 = auto, 0 = no-fork, 1 = force fork
-
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "--help" || arg == "-h") {
@@ -770,14 +664,6 @@ int main(int argc, char** argv) {
                 solve_params.backend = parse_backend_kind(argv[++i]);
                 continue;
             }
-            if (arg == "--no-fork") {
-                fork_override = 0;
-                continue;
-            }
-            if (arg == "--fork") {
-                fork_override = 1;
-                continue;
-            }
             if (!arg.empty() && arg[0] != '-') {
                 std::ostringstream ss;
                 ss << arg;
@@ -807,16 +693,6 @@ int main(int argc, char** argv) {
         }
 
         if (filter_mode) {
-            // fork is incompatible with HiGHS: libhighs uses a global
-            // thread pool (HighsTaskExecutor) that cannot survive fork().
-            // Default: in-process for highs/both, fork for custom only.
-            bool use_fork;
-            if (fork_override >= 0) {
-                use_fork = (fork_override == 1);
-            } else {
-                use_fork = (solve_params.backend == BackendKind::Custom);
-            }
-
             FilterCaseStreamState state;
             std::vector<size_t> gens;
             size_t case_index = 0;
@@ -825,7 +701,7 @@ int main(int argc, char** argv) {
                 ++case_index;
                 process_filter_case(
                     gens, case_index, axis, strict_margin, all_rotations, projective_rotations, try_reflect,
-                    print_gens, print_sat_gens, print_sat_lines, solve_params, use_fork
+                    print_gens, print_sat_gens, print_sat_lines, solve_params
                 );
             }
             if (case_index == 0) throw std::runtime_error("No cases parsed from stdin");
