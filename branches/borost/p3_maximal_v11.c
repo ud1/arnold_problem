@@ -214,6 +214,8 @@ static int result_count;
 static int max_results_val;
 static long long node_count;
 static int verbose;
+static int debug_mode;
+static struct timespec t0_global;
 
 /* ── Result storage ───────────────────────────────────────────── */
 
@@ -444,19 +446,133 @@ static int extract_tri_count(void) {
     return count;
 }
 
+/* ── O-matrix and generator extraction ────────────────────────── */
+
+static int omatrix[N_MAX][N_MAX];
+static int omatrix_len[N_MAX];
+static int gens_buf[N_MAX * N_MAX];
+
+static void build_omatrix(int r, int n) {
+    int old_to_new[N_MAX+1];
+    int8_t hn_sgn[N_MAX+1];
+    memset(old_to_new, -1, sizeof(old_to_new));
+    memset(hn_sgn, 0, sizeof(hn_sgn));
+    for (int i = 0; i < hn_len; i++) {
+        old_to_new[hn[i]] = i;
+        hn_sgn[hn[i]] = (i % 2 == 0) ? 1 : -1;
+    }
+    for (int p = 1; p < n; p++) {
+        int new_line = old_to_new[p];
+        int *hl = stored_hls[r][p];
+        int hl_len = stored_hls_len[r][p];
+        int row[N_MAX];
+        int rlen = 0;
+        for (int i = 0; i < hl_len; i++) {
+            if (hl[i] == n) continue;
+            row[rlen++] = old_to_new[hl[i]];
+        }
+        if (hn_sgn[p] == -1)
+            for (int i = 0; i < rlen / 2; i++) {
+                int t = row[i]; row[i] = row[rlen-1-i]; row[rlen-1-i] = t;
+            }
+        memcpy(omatrix[new_line], row, rlen * sizeof(int));
+        omatrix_len[new_line] = rlen;
+    }
+}
+
+/* Build O-matrix from temporary hyperline arrays (for immediate output) */
+static void build_omatrix_from_hls(int n, int tmp_hl[][N_MAX], int *tmp_hl_len) {
+    int old_to_new[N_MAX+1];
+    int8_t hn_sgn[N_MAX+1];
+    memset(old_to_new, -1, sizeof(old_to_new));
+    memset(hn_sgn, 0, sizeof(hn_sgn));
+    for (int i = 0; i < hn_len; i++) {
+        old_to_new[hn[i]] = i;
+        hn_sgn[hn[i]] = (i % 2 == 0) ? 1 : -1;
+    }
+    for (int p = 1; p < n; p++) {
+        int new_line = old_to_new[p];
+        int row[N_MAX];
+        int rlen = 0;
+        for (int i = 0; i < tmp_hl_len[p]; i++) {
+            if (tmp_hl[p][i] == n) continue;
+            row[rlen++] = old_to_new[tmp_hl[p][i]];
+        }
+        if (hn_sgn[p] == -1)
+            for (int i = 0; i < rlen / 2; i++) {
+                int t = row[i]; row[i] = row[rlen-1-i]; row[rlen-1-i] = t;
+            }
+        memcpy(omatrix[new_line], row, rlen * sizeof(int));
+        omatrix_len[new_line] = rlen;
+    }
+}
+
+static int omatrix_to_generators(int nn) {
+    int lines[N_MAX], pos[N_MAX];
+    for (int i = 0; i < nn; i++) { lines[i] = i; pos[i] = 0; }
+    int total_incidences = 0;
+    for (int i = 0; i < nn; i++) total_incidences += omatrix_len[i];
+    int steps = total_incidences / 2;
+    for (int step = 0; step < steps; step++) {
+        int found = 0;
+        for (int g = 0; g + 1 < nn; g++) {
+            int left = lines[g], right = lines[g+1];
+            if (pos[left] >= omatrix_len[left]) continue;
+            if (pos[right] >= omatrix_len[right]) continue;
+            if (omatrix[left][pos[left]] != right) continue;
+            if (omatrix[right][pos[right]] != left) continue;
+            pos[left]++; pos[right]++;
+            lines[g] = right; lines[g+1] = left;
+            gens_buf[step] = g;
+            found = 1;
+            break;
+        }
+        if (!found) return -1;
+    }
+    for (int i = 0; i < nn; i++)
+        if (pos[i] != omatrix_len[i]) return -1;
+    return steps;
+}
+
 /* ── Store result ─────────────────────────────────────────────── */
 
 static void store_result(void) {
     int n = n_val;
     int idx = result_count;
-    if (idx >= MAX_STORE) return;
 
-    for (int i = 0; i < hn_len; i++)
-        stored_hls[idx][n][i] = hn[i];
-    stored_hls_len[idx][n] = hn_len;
+    if (debug_mode) {
+        if (idx >= MAX_STORE) return;
+        for (int i = 0; i < hn_len; i++)
+            stored_hls[idx][n][i] = hn[i];
+        stored_hls_len[idx][n] = hn_len;
+        for (int p = 1; p < n; p++)
+            stored_hls_len[idx][p] = build_sequence(p, stored_hls[idx][p]);
+    } else {
+        int tmp_hl[N_MAX+1][N_MAX];
+        int tmp_hl_len[N_MAX+1];
+        for (int i = 0; i < hn_len; i++)
+            tmp_hl[n][i] = hn[i];
+        tmp_hl_len[n] = hn_len;
+        for (int p = 1; p < n; p++)
+            tmp_hl_len[p] = build_sequence(p, tmp_hl[p]);
 
-    for (int p = 1; p < n; p++) {
-        stored_hls_len[idx][p] = build_sequence(p, stored_hls[idx][p]);
+        int nn = n - 1;
+        build_omatrix_from_hls(n, tmp_hl, tmp_hl_len);
+        int ngens = omatrix_to_generators(nn);
+
+        struct timespec t1;
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        double elapsed = (t1.tv_sec - t0_global.tv_sec) +
+                         (t1.tv_nsec - t0_global.tv_nsec) * 1e-9;
+
+        printf("[%es] i=%e)", elapsed, (double)node_count);
+        if (ngens >= 0)
+            for (int i = 0; i < ngens; i++)
+                printf(" %d", gens_buf[i]);
+        else
+            printf(" ERROR");
+        printf("\n");
+        fflush(stdout);
     }
 }
 
@@ -737,64 +853,113 @@ static int generate(int n, int max_results) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: p3_maximal_v11c <n> [max_results]\n");
+        fprintf(stderr, "Usage: p3v11 <n> [max_results] [--debug]\n");
         return 1;
     }
-    int n = atoi(argv[1]);
-    int max_results = (argc > 2) ? atoi(argv[2]) : 0;
+
+    /* Parse arguments: positional n, optional max_results, optional --debug */
+    int n = 0, max_results = 0;
+    debug_mode = 0;
+    int pos_args[2], pos_count = 0;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--debug") == 0) {
+            debug_mode = 1;
+        } else {
+            if (pos_count < 2) pos_args[pos_count] = atoi(argv[i]);
+            pos_count++;
+        }
+    }
+    if (pos_count < 1) {
+        fprintf(stderr, "Usage: p3v11 <n> [max_results] [--debug]\n");
+        return 1;
+    }
+    n = pos_args[0];
+    if (pos_count >= 2) max_results = pos_args[1];
 
     if (n % 2 != 0 || n < 4 || n % 3 == 2) {
         fprintf(stderr, "Invalid n=%d: need n even, n>=4, n mod 3 != 2\n", n);
         return 1;
     }
 
-    verbose = 1;
-    int m = n / 2;
-    int exp_tri = n * (n - 1) / 3;
-    const char *lim = max_results ? " (limit)" : " (exhaustive)";
-    printf("n=%d m=%d expected_tri=%d%s\n", n, m, exp_tri, lim);
+    verbose = debug_mode;
 
-    struct timespec t0, t1;
-    clock_gettime(CLOCK_MONOTONIC, &t0);
+    if (debug_mode) {
+        int m = n / 2;
+        int exp_tri = n * (n - 1) / 3;
+        const char *lim = max_results ? " (limit)" : " (exhaustive)";
+        printf("n=%d m=%d expected_tri=%d%s\n", n, m, exp_tri, lim);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &t0_global);
 
     int count = generate(n, max_results);
 
+    struct timespec t1;
     clock_gettime(CLOCK_MONOTONIC, &t1);
-    double elapsed = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) * 1e-9;
+    double elapsed = (t1.tv_sec - t0_global.tv_sec) +
+                     (t1.tv_nsec - t0_global.tv_nsec) * 1e-9;
 
-    printf("\n%d arrangement(s) in %.3fs (%lld nodes)\n", count, elapsed, node_count);
+    if (debug_mode) {
+        printf("\n%d arrangement(s) in %.3fs (%lld nodes)\n", count, elapsed, node_count);
 
-    int show = count < 5 ? count : 5;
-    for (int r = 0; r < show; r++) {
-        printf("\n=== #%d ===\n", r + 1);
-        for (int p = 1; p <= n; p++) {
-            printf("  L%d:", p);
-            for (int i = 0; i < stored_hls_len[r][p]; i++)
-                printf(" %d", stored_hls[r][p][i]);
-            printf("\n");
-        }
-        uint32_t adj_bits[N_MAX+1][N_MAX+1];
-        memset(adj_bits, 0, sizeof(adj_bits));
-        for (int p = 1; p <= n; p++) {
-            int len = stored_hls_len[r][p];
-            for (int i = 0; i < len; i++) {
-                int j = (i + 1) % len;
-                int a = stored_hls[r][p][i];
-                int b = stored_hls[r][p][j];
-                adj_bits[p][a] |= 1u << b;
-                adj_bits[p][b] |= 1u << a;
+        int show = count < MAX_STORE ? count : MAX_STORE;
+        for (int r = 0; r < show; r++) {
+            printf("\n=== #%d ===\n", r + 1);
+            for (int p = 1; p <= n; p++) {
+                printf("  L%d:", p);
+                for (int i = 0; i < stored_hls_len[r][p]; i++)
+                    printf(" %d", stored_hls[r][p][i]);
+                printf("\n");
+            }
+
+            /* Triangle count */
+            uint32_t adj_bits[N_MAX+1][N_MAX+1];
+            memset(adj_bits, 0, sizeof(adj_bits));
+            for (int p = 1; p <= n; p++) {
+                int len = stored_hls_len[r][p];
+                for (int i = 0; i < len; i++) {
+                    int j = (i + 1) % len;
+                    int a = stored_hls[r][p][i];
+                    int b = stored_hls[r][p][j];
+                    adj_bits[p][a] |= 1u << b;
+                    adj_bits[p][b] |= 1u << a;
+                }
+            }
+            int tri = 0;
+            for (int i = 1; i <= n; i++)
+                for (int j = i + 1; j <= n; j++)
+                    for (int k = j + 1; k <= n; k++) {
+                        if ((adj_bits[i][j] & (1u << k)) &&
+                            (adj_bits[j][i] & (1u << k)) &&
+                            (adj_bits[k][i] & (1u << j)))
+                            tri++;
+                    }
+            printf("  Triangles (%d)\n", tri);
+
+            /* O-matrix and generators */
+            int nn = n - 1;
+            build_omatrix(r, n);
+            printf("  O-matrix (%d lines, 0-based):\n", nn);
+            for (int i = 0; i < nn; i++) {
+                printf("    [%d]:", i);
+                for (int j = 0; j < omatrix_len[i]; j++)
+                    printf(" %d", omatrix[i][j]);
+                printf("\n");
+            }
+
+            int ngens = omatrix_to_generators(nn);
+            if (ngens < 0) {
+                printf("  Generators: ERROR (conversion failed)\n");
+            } else {
+                printf("  Generators (%d):", ngens);
+                for (int i = 0; i < ngens; i++)
+                    printf(" %d", gens_buf[i]);
+                printf("\n");
             }
         }
-        int tri = 0;
-        for (int i = 1; i <= n; i++)
-            for (int j = i + 1; j <= n; j++)
-                for (int k = j + 1; k <= n; k++) {
-                    if ((adj_bits[i][j] & (1u << k)) &&
-                        (adj_bits[j][i] & (1u << k)) &&
-                        (adj_bits[k][i] & (1u << j)))
-                        tri++;
-                }
-        printf("  Triangles (%d)\n", tri);
+    } else {
+        fprintf(stderr, "%d arrangement(s) in %.3fs (%lld nodes)\n",
+                count, elapsed, node_count);
     }
 
     return 0;
