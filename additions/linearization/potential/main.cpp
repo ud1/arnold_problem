@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <unistd.h>
 
+#include "common/edge_specs.h"
 #include "common/input_parsing.h"
 #include "common/omatrix.h"
 
@@ -106,33 +107,8 @@ struct AxisModeConfig {
     double eps = 1e-4;
 };
 
-struct HyperEdgeTerm {
-    size_t b1, b2, m1, m2, b3, b4, m3, m4;
-};
-
-static std::vector<HyperEdgeTerm> build_hyper_edge_terms(const OMatrix& o) {
-    std::vector<HyperEdgeTerm> specs;
-    for (size_t i = 0; i < o.n; ++i) {
-        const auto& line = o.intersections[i];
-        if (line.size() < 2) continue;
-
-        for (size_t idx = 0; idx + 1 < line.size(); ++idx) {
-            size_t j = line[idx];
-            size_t k = line[idx + 1];
-
-            if (i > j && i > k) {
-                specs.push_back({k, i, i, j, j, i, i, k});
-            } else if (i > j && i < k) {
-                specs.push_back({i, k, i, j, j, i, k, i});
-            } else if (i < j && i > k) {
-                specs.push_back({k, i, j, i, i, j, i, k});
-            } else {
-                specs.push_back({i, k, j, i, i, j, k, i});
-            }
-        }
-    }
-    return specs;
-}
+// HyperEdgeTerm is now EdgeSpec from common/edge_specs.h
+using HyperEdgeTerm = EdgeSpec;
 
 static std::vector<double> build_hyperbolic_b(const OMatrix& o, size_t axis_line, double eps) {
     if (o.n % 2 == 0) throw std::runtime_error("Hyperbolic axis mode supports only odd n");
@@ -617,7 +593,7 @@ struct Terms {
             for (size_t i = 1; i < n; ++i) {
                 params[i] = static_cast<double>(i);
             }
-            hyperEdgeTerms = build_hyper_edge_terms(o);
+            hyperEdgeTerms = build_edge_specs(o);
             for (size_t i = 1; i + 1 < n; ++i) {
                 angleTerms.emplace_back(m(i), m(i + 1));
             }

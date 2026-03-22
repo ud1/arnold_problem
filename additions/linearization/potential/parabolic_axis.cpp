@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <vector>
 
+#include "common/edge_specs.h"
 #include "common/input_parsing.h"
 #include "common/omatrix.h"
 #include "common/rotation_search.h"
@@ -107,41 +108,6 @@ static BuildResult build_fixed_slopes(size_t n, const AxisModeConfig& cfg) {
     return BuildResult{m, axis_left, axis_right};
 }
 
-struct EdgeSpec {
-    size_t b1, b2, m1, m2, b3, b4, m3, m4;
-};
-
-static std::vector<EdgeSpec> build_edge_specs(const OMatrix& o) {
-    std::vector<EdgeSpec> specs;
-
-    auto push_spec = [&](size_t b1, size_t b2, size_t m1, size_t m2, size_t b3, size_t b4, size_t m3, size_t m4) {
-        specs.push_back(EdgeSpec{b1, b2, m1, m2, b3, b4, m3, m4});
-    };
-
-    for (size_t i = 0; i < o.n; ++i) {
-        const auto& line = o.intersections[i];
-        if (line.size() < 2) continue;
-
-        for (size_t idx = 0; idx + 1 < line.size(); ++idx) {
-            size_t j = line[idx];
-            size_t k = line[idx + 1];
-            if (j >= o.n || k >= o.n) continue;
-            if (j == i || k == i) continue;
-
-            if (i > j && i > k) {
-                push_spec(k, i, i, j, j, i, i, k);
-            } else if (i > j && i < k) {
-                push_spec(i, k, i, j, j, i, k, i);
-            } else if (i < j && i > k) {
-                push_spec(k, i, j, i, i, j, i, k);
-            } else {
-                push_spec(i, k, j, i, i, j, k, i);
-            }
-        }
-    }
-
-    return specs;
-}
 
 struct LinearSystem {
     std::vector<std::vector<long double>> A;
