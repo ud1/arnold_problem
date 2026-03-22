@@ -217,8 +217,6 @@ struct Options {
     RotationSearchConfig rot_cfg;
     bool print_sat_gens = false;
     bool print_sat_lines = false;
-    std::string output_format = "full";
-    bool metadata_only = false;
 
     long double tol = 1e-10L;
     long double m_order_delta = 1e-4L;
@@ -241,8 +239,6 @@ static void print_usage(const char* argv0) {
         << "  --projective-rotations, -p  Try all projective rotations; implies -e\n"
         << "  --print-sat-gens        Filter mode: print generators for SAT cases\n"
         << "  --print-sat-lines       Filter mode: print line equations for SAT cases\n"
-        << "  --output-format compact|full|json\n"
-        << "  --metadata-only         Filter mode: diagnostics only\n"
         << "  --solver highs|custom|both (default highs)\n";
 }
 
@@ -435,8 +431,6 @@ static bool better_attempt(const AttemptResult& a, const AttemptResult& b) {
     return a.max_violation < b.max_violation;
 }
 
-static std::string bool_to_json(bool v) { return v ? "true" : "false"; }
-
 static void print_lines_csv_block(const std::vector<long double>& m, const std::vector<long double>& b) {
     std::cout << "#LINES_BEGIN\n";
     std::cout << "m,b\n";
@@ -453,95 +447,6 @@ static void print_generators_line(const std::vector<size_t>& gens, const std::st
         std::cout << gens[i];
     }
     std::cout << "]\n";
-}
-
-static void print_result(const AttemptResult& r, const std::string& format, bool include_lines, size_t case_idx = 0) {
-    const char* status = r.feasible ? "SAT" : "NO_SOLUTION";
-    std::vector<long double> output_m;
-    std::vector<long double> output_b;
-    const bool have_output_lines = r.feasible && include_lines && build_output_lines_swapped_xy(r, output_m, output_b);
-
-    if (format == "json") {
-        std::cout << "{";
-        if (case_idx > 0) std::cout << "\"case\":" << case_idx << ",";
-        std::cout << "\"status\":\"" << status << "\""
-                  << ",\"n\":" << r.n
-                  << ",\"gens_count\":" << r.gens_count
-                  << ",\"projective_rotation\":" << r.projective_rotation
-                  << ",\"tried_projective_rotations\":" << r.tried_projective_rotations
-                  << ",\"axis_input\":" << r.axis_input
-                  << ",\"axis_used\":" << r.axis_used
-                  << ",\"rotation\":" << r.rotation
-                  << ",\"reflected\":" << bool_to_json(r.reflected)
-                  << ",\"m_order\":\"" << (r.m_order_increasing ? "inc" : "dec") << "\""
-                  << ",\"margin\":" << std::setprecision(21) << r.margin
-                  << ",\"eps\":" << r.eps
-                  << ",\"output_rotation_phi\":" << r.output_rotation_phi
-                  << ",\"t\":" << r.t
-                  << ",\"max_violation\":" << r.max_violation
-                  << ",\"worst_raw\":" << r.worst_raw
-                  << ",\"solver\":\"" << backend_kind_name(r.solver_backend) << "\"";
-        if (!r.error.empty()) std::cout << ",\"error\":\"" << r.error << "\"";
-        if (have_output_lines) {
-            std::cout << ",\"lines\":[";
-            for (size_t i = 0; i < r.n; ++i) {
-                if (i) std::cout << ",";
-                std::cout << "[" << output_m[i] << "," << output_b[i] << "]";
-            }
-            std::cout << "]";
-        }
-        std::cout << "}\n";
-        return;
-    }
-
-    if (format == "compact") {
-        std::cout << status;
-        if (case_idx > 0) std::cout << " #" << case_idx;
-        std::cout << " n=" << r.n
-                  << " gens=" << r.gens_count
-                  << " projective_rotation=" << r.projective_rotation
-                  << " tried_projective_rotations=" << r.tried_projective_rotations
-                  << " axis_input=" << r.axis_input
-                  << " axis_used=" << r.axis_used
-                  << " rotation=" << r.rotation
-                  << " reflected=" << (r.reflected ? 1 : 0)
-                  << " m_order=" << (r.m_order_increasing ? "inc" : "dec")
-                  << " margin=" << std::setprecision(21) << r.margin
-                  << " eps=" << r.eps
-                  << " output_rotation_phi=" << r.output_rotation_phi
-                  << " t=" << r.t
-                  << " max_violation=" << r.max_violation
-                  << " worst_raw=" << r.worst_raw
-                  << " solver=" << backend_kind_name(r.solver_backend);
-        if (!r.error.empty()) std::cout << " error=" << r.error;
-        std::cout << "\n";
-        return;
-    }
-
-    std::cout << status << "\n";
-    std::cout << "n=" << r.n
-              << " gens_count=" << r.gens_count
-              << " axis_input=" << r.axis_input
-              << " axis_used=" << r.axis_used
-              << " rotation=" << r.rotation
-              << " reflected=" << (r.reflected ? 1 : 0)
-              << " m_order=" << (r.m_order_increasing ? "inc" : "dec")
-              << " margin=" << std::setprecision(21) << r.margin
-              << " eps=" << r.eps
-              << " output_rotation_phi=" << r.output_rotation_phi
-              << " t=" << r.t
-              << " max_violation=" << r.max_violation
-              << " worst_raw=" << r.worst_raw
-              << " solver=" << backend_kind_name(r.solver_backend);
-    if (!r.error.empty()) std::cout << " error=" << r.error;
-    std::cout << "\n";
-    std::cout << "projective_rotation=" << r.projective_rotation
-              << " tried_projective_rotations=" << r.tried_projective_rotations
-              << "\n";
-
-    if (have_output_lines) {
-        print_lines_csv_block(output_m, output_b);
-    }
 }
 
 static AttemptResult solve_case(const std::vector<size_t>& gens, const Options& opt) {
@@ -636,18 +541,6 @@ int main(int argc, char** argv) {
                 opt.print_sat_lines = true;
                 continue;
             }
-            if (arg == "--output-format") {
-                if (i + 1 >= argc) throw std::runtime_error("Missing value for --output-format");
-                opt.output_format = argv[++i];
-                if (opt.output_format != "compact" && opt.output_format != "full" && opt.output_format != "json") {
-                    throw std::runtime_error("--output-format must be compact|full|json");
-                }
-                continue;
-            }
-            if (arg == "--metadata-only") {
-                opt.metadata_only = true;
-                continue;
-            }
             if (arg == "--solver") {
                 if (i + 1 >= argc) throw std::runtime_error("Missing value for --solver");
                 opt.solver_backend = parse_backend_kind(argv[++i]);
@@ -731,10 +624,27 @@ int main(int argc, char** argv) {
         if (gens_parsed.empty()) throw std::runtime_error("No valid generator numbers parsed");
 
         auto result = solve_case(gens_parsed, opt);
-        const bool include_lines = !(opt.metadata_only && opt.filter_mode);
-        print_result(result, opt.output_format, include_lines && opt.output_format == "full", 0);
-        if (result.feasible && opt.print_sat_gens) {
-            print_generators_line(result.omatrix_gens);
+
+        std::cout << std::setprecision(18);
+        std::cout << (result.feasible ? "SAT" : "NO_SOLUTION") << "\n";
+        std::cout << "n=" << result.n
+                  << " gens=" << result.gens_count
+                  << " reflected=" << (result.reflected ? 1 : 0)
+                  << " eucl_rot=" << result.euclidean_rotation << "/" << result.tried_euclidean_rotations
+                  << " proj_rot=" << result.projective_rotation << "/" << result.tried_projective_rotations
+                  << " margin=" << std::setprecision(21) << (double)result.margin
+                  << " t=" << (double)result.t
+                  << " worst_raw=" << (double)result.worst_raw
+                  << " solver=" << backend_kind_name(result.solver_backend);
+        if (!result.error.empty()) std::cout << " error=" << result.error;
+        std::cout << "\n";
+
+        if (result.feasible &&
+            result.m_orig.size() == result.n && result.b_orig.size() == result.n) {
+            std::vector<long double> output_m, output_b;
+            if (build_output_lines_swapped_xy(result, output_m, output_b)) {
+                print_lines_csv_block(output_m, output_b);
+            }
         }
         return result.feasible ? 0 : 1;
     } catch (const std::exception& e) {

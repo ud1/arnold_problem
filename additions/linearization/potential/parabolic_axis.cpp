@@ -342,7 +342,6 @@ static void print_filter_result(
     size_t case_index,
     int tried_projective_rotations,
     int tried_plane_rotations,
-    bool print_gens,
     bool print_sat_gens,
     bool print_sat_lines
 ) {
@@ -367,9 +366,6 @@ static void print_filter_result(
         std::cout << "#LINES_END #" << case_index << "\n";
     }
     if (res.sat && print_sat_gens) {
-        print_generators_line(res.omatrix_gens, "GENS #" + std::to_string(case_index));
-    }
-    if (print_gens) {
         print_generators_line(res.omatrix_gens, "GENS #" + std::to_string(case_index));
     }
     std::cout.flush();
@@ -401,7 +397,6 @@ static void process_filter_case(
     const AxisModeConfig& axis,
     long double strict_margin,
     const RotationSearchConfig& rot_cfg,
-    bool print_gens,
     bool print_sat_gens,
     bool print_sat_lines,
     const SolveParams& solve_params
@@ -412,7 +407,7 @@ static void process_filter_case(
         AttemptResult res = solve_case_full(o, gens.size(), axis, strict_margin, rot_cfg, rot_stats, solve_params);
         print_filter_result(res, gens, case_index,
             rot_stats.tried_projective, rot_stats.tried_euclidean,
-            print_gens, print_sat_gens, print_sat_lines);
+            print_sat_gens, print_sat_lines);
     } catch (const std::exception& e) {
         std::cout << "ERROR"
                   << " #" << case_index
@@ -442,9 +437,8 @@ static void print_usage(const char* argv0) {
         << "  --try-reflect, -r: also try reflected O-matrix\n"
         << "  --euclidean-rotations, -e: iterate all valid O-matrix plane rotations\n"
         << "  --projective-rotations, -p: iterate all projective rotations; implies -e\n"
-        << "  --print-gens: print generators for the O-matrix used to produce LINES\n"
-        << "  --print-sat-gens: in filter mode, print generators only for SAT cases\n"
-        << "  --print-sat-lines: in filter mode, print line equations only for SAT cases\n"
+        << "  --print-sat-gens: in filter mode, print generators for SAT cases\n"
+        << "  --print-sat-lines: in filter mode, print line equations for SAT cases\n"
         << "  --solver highs|custom|both: LP backend (default highs)\n";
 }
 
@@ -457,7 +451,6 @@ int main(int argc, char** argv) {
         AxisModeConfig axis;
         bool axis_seen = false;
         RotationSearchConfig rot_cfg;
-        bool print_gens = false;
         bool print_sat_gens = false;
         bool print_sat_lines = false;
         SolveParams solve_params;
@@ -521,10 +514,6 @@ int main(int argc, char** argv) {
                 rot_cfg.euclidean_rotations = true;
                 continue;
             }
-            if (arg == "--print-gens") {
-                print_gens = true;
-                continue;
-            }
             if (arg == "--print-sat-gens") {
                 print_sat_gens = true;
                 continue;
@@ -575,7 +564,7 @@ int main(int argc, char** argv) {
                 ++case_index;
                 process_filter_case(
                     gens, case_index, axis, strict_margin, rot_cfg,
-                    print_gens, print_sat_gens, print_sat_lines, solve_params
+                    print_sat_gens, print_sat_lines, solve_params
                 );
             }
             if (case_index == 0) throw std::runtime_error("No cases parsed from stdin");
@@ -617,9 +606,6 @@ int main(int argc, char** argv) {
                   << "\n";
 
         print_lines_csv_block(res.m, res.b);
-        if (print_gens) {
-            print_generators_line(res.omatrix_gens);
-        }
 
         return res.sat ? 0 : 1;
     } catch (const std::exception& e) {
