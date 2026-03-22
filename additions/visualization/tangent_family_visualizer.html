@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Визуализация семейства касательных к параболе</title>
+  <style>
+    :root {
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #d1d5db;
+      --accent: #2563eb;
+      --accent-2: #0f766e;
+      --danger: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      height: 100%;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: minmax(380px, 1fr) 380px;
+      gap: 16px;
+      padding: 16px;
+      min-height: 100vh;
+    }
+    .canvas-wrap, .controls {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.05);
+      overflow: hidden;
+    }
+    .canvas-head, .controls-head {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      background: #fbfcff;
+    }
+    .canvas-head h1, .controls-head h2 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+    .sub {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    #view {
+      display: block;
+      width: 100%;
+      height: calc(100vh - 110px);
+      min-height: 620px;
+      background: white;
+    }
+    .controls-body {
+      padding: 14px 18px 18px;
+      overflow: auto;
+      max-height: calc(100vh - 84px);
+    }
+    .group {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 12px;
+      background: #fff;
+    }
+    .group-title {
+      font-weight: 700;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .row:last-child { margin-bottom: 0; }
+    .row label {
+      font-size: 13px;
+      line-height: 1.3;
+    }
+    .value {
+      color: var(--accent);
+      min-width: 72px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+    }
+    input[type="range"] {
+      width: 100%;
+      margin-top: 6px;
+    }
+    input[type="number"], select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font: inherit;
+      background: white;
+      color: var(--text);
+    }
+    .stack { display: grid; gap: 8px; }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 6px 0;
+      font-size: 13px;
+    }
+    .stats {
+      display: grid;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .stat-box {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fafafa;
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .formula {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      white-space: pre-wrap;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 12px;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+    @media (max-width: 1100px) {
+      .app { grid-template-columns: 1fr; }
+      #view { height: 70vh; min-height: 480px; }
+      .controls-body { max-height: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="canvas-wrap">
+      <div class="canvas-head">
+        <h1>Касательные к параболе и точки их пересечения</h1>
+        <div class="sub">Слева — картинка. Справа — параметры семейства <code>t_i</code>. Рисуем касательные к <code>y = x²</code>, а в местах их пересечения показываем кружочки.</div>
+      </div>
+      <canvas id="view"></canvas>
+    </section>
+
+    <aside class="controls">
+      <div class="controls-head">
+        <h2>Параметры</h2>
+        <div class="sub">Можно сравнивать арифметическую, геометрическую и дробно-линейную орбиты.</div>
+      </div>
+      <div class="controls-body">
+        <div class="group">
+          <div class="group-title">Семейство параметров касания</div>
+          <div class="stack">
+            <div>
+              <label for="familyType">Тип семейства</label>
+              <select id="familyType">
+                <option value="arithmetic">Арифметическая прогрессия: tᵢ = t₀ + i·h</option>
+                <option value="geometric">Геометрическая прогрессия: tᵢ = t₀·qⁱ</option>
+                <option value="mobius">Орбита Мёбиуса: tᵢ₊₁ = (a tᵢ + b)/(c tᵢ + d)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="group" id="commonGroup">
+          <div class="group-title">Общие параметры</div>
+          <div class="row">
+            <label>Число линий n
+              <input id="n" type="range" min="3" max="24" step="1" value="10">
+            </label>
+            <div class="value" id="nVal"></div>
+          </div>
+          <div class="row">
+            <label>t₀
+              <input id="t0" type="range" min="-4" max="4" step="0.01" value="-1.8">
+            </label>
+            <div class="value" id="t0Val"></div>
+          </div>
+        </div>
+
+        <div class="group" id="arithGroup">
+          <div class="group-title">Арифметическая прогрессия</div>
+          <div class="row">
+            <label>Шаг h
+              <input id="h" type="range" min="0.05" max="1.2" step="0.01" value="0.42">
+            </label>
+            <div class="value" id="hVal"></div>
+          </div>
+        </div>
+
+        <div class="group" id="geomGroup">
+          <div class="group-title">Геометрическая прогрессия</div>
+          <div class="row">
+            <label>Множитель q
+              <input id="q" type="range" min="0.6" max="1.8" step="0.01" value="1.12">
+            </label>
+            <div class="value" id="qVal"></div>
+          </div>
+        </div>
+
+        <div class="group" id="mobiusGroup">
+          <div class="group-title">Орбита дробно-линейного преобразования</div>
+          <div class="row">
+            <label>a
+              <input id="ma" type="range" min="-2" max="2" step="0.01" value="1.00">
+            </label>
+            <div class="value" id="maVal"></div>
+          </div>
+          <div class="row">
+            <label>b
+              <input id="mb" type="range" min="-2" max="2" step="0.01" value="0.35">
+            </label>
+            <div class="value" id="mbVal"></div>
+          </div>
+          <div class="row">
+            <label>c
+              <input id="mc" type="range" min="-1" max="1" step="0.01" value="0.00">
+            </label>
+            <div class="value" id="mcVal"></div>
+          </div>
+          <div class="row">
+            <label>d
+              <input id="md" type="range" min="-2" max="2" step="0.01" value="1.00">
+            </label>
+            <div class="value" id="mdVal"></div>
+          </div>
+          <div class="hint">Если знаменатель <code>c t + d</code> близок к нулю, очередной параметр пропускается.</div>
+        </div>
+
+        <div class="group">
+          <div class="group-title">Отрисовка</div>
+          <div class="row">
+            <label>Масштаб
+              <input id="zoom" type="range" min="40" max="180" step="1" value="86">
+            </label>
+            <div class="value" id="zoomVal"></div>
+          </div>
+          <div class="check"><input id="showParabola" type="checkbox" checked><label for="showParabola">Показывать параболу</label></div>
+          <div class="check"><input id="showLabels" type="checkbox"><label for="showLabels">Подписывать линии ℓᵢ и точки tᵢ</label></div>
+          <div class="check"><input id="showIntersections" type="checkbox" checked><label for="showIntersections">Показывать точки пересечения</label></div>
+          <div class="check"><input id="showSumBands" type="checkbox" checked><label for="showSumBands">Подсвечивать группы с одинаковым i+j</label></div>
+          <div class="check"><input id="showPairSegments" type="checkbox"><label for="showPairSegments">Проводить отрезки через группы одинакового i+j</label></div>
+        </div>
+
+        <div class="group">
+          <div class="group-title">Подсказка</div>
+          <div class="formula">Для y = x²:
+ℓ(t): y = 2 t x - t²
+ℓ(a) ∩ ℓ(b) = ((a+b)/2, ab)
+
+При арифметической прогрессии tᵢ = t₀ + i h
+и фиксированной сумме i+j = s:
+  x = t₀ + (s h)/2 = const
+=> точки лежат на одной вертикали.
+
+При геометрической прогрессии tᵢ = t₀ qⁱ
+и фиксированной сумме i+j = s:
+  y = t₀² qˢ = const
+=> точки лежат на одной горизонтали.</div>
+        </div>
+
+        <div class="group">
+          <div class="group-title">Статистика</div>
+          <div class="stats" id="stats"></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script src="./tangent_family_visualizer.js"></script>
+</body>
+</html>
