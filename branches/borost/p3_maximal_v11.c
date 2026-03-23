@@ -42,6 +42,30 @@ static int ord_trail_len;
 
 static int ord_mark(void) { return ord_trail_len; }
 
+/* ── Block grouping ──────────────────────────────────────────── */
+/* Chain pointers: blk_next[p][e] = next element in block, -1 if right end */
+static int blk_next[N_MAX+1][N_MAX+1];
+static int blk_prev[N_MAX+1][N_MAX+1];
+/* For endpoints: blk_other_end[p][e] = the other endpoint of e's block */
+static int blk_other_end[N_MAX+1][N_MAX+1];
+
+typedef struct { int16_t p, a, b, ll, rr; } BlkTrailEntry;
+static BlkTrailEntry blk_trail[N_MAX*N_MAX*N_MAX*4];
+static int blk_trail_len;
+
+static int blk_mark(void) { return blk_trail_len; }
+
+static void blk_undo(int mark) {
+    while (blk_trail_len > mark) {
+        blk_trail_len--;
+        BlkTrailEntry *e = &blk_trail[blk_trail_len];
+        blk_next[e->p][e->a] = -1;
+        blk_prev[e->p][e->b] = -1;
+        blk_other_end[e->p][e->ll] = e->a;
+        blk_other_end[e->p][e->rr] = e->b;
+    }
+}
+
 static void ord_undo(int mark) {
     while (ord_trail_len > mark) {
         ord_trail_len--;
@@ -60,6 +84,8 @@ static int n_val;
 static int8_t sgn[N_MAX+1][N_MAX+1];
 static uint64_t rem_mask[N_MAX+1];
 
+static inline void try_blk_merge(int q, int a, int b);
+
 /* Update ordering masks when chi_v[h][a][b] is newly set to val_hab */
 static inline void update_ordering(int h, int a, int b, int val_hab) {
     if (h < 1 || h == n_val) return;
@@ -77,6 +103,7 @@ static inline void update_ordering(int h, int a, int b, int val_hab) {
             ord_trail[idx*3]   = h;
             ord_trail[idx*3+1] = a;
             ord_trail[idx*3+2] = b;
+            try_blk_merge(h, a, b);
         }
     } else {
         /* b before a on hyperline h */
@@ -87,13 +114,14 @@ static inline void update_ordering(int h, int a, int b, int val_hab) {
             ord_trail[idx*3]   = h;
             ord_trail[idx*3+1] = b;
             ord_trail[idx*3+2] = a;
+            try_blk_merge(h, b, a);
         }
     }
 }
 
 static int chi_mark(void) { return chi_trail_len; }
 
-static int chi_put(int i, int j, int k, int val) {
+static inline int chi_put(int i, int j, int k, int val) {
     int cur = chi_v[i][j][k];
     if (cur != 0)
         return cur == val;
@@ -182,6 +210,7 @@ static int add_adj(int q, int a, int b) {
         adj_trail[idx*2+1] = b;
         adj_trail_len++;
     }
+    try_blk_merge(q, a, b);
     return 1;
 }
 
@@ -195,6 +224,47 @@ static int can_add_adj(int q, int a, int b) {
                   (nc_b > 1 && nbr_data[q][b][1] == a);
     if (!b_has_a && nc_b >= 2) return 0;
     return 1;
+}
+
+/* ── Block merge ─────────────────────────────────────────────── */
+
+/* Try to merge blocks of a and b on hyperline q.
+ * Requires: both in rem_mask, known adjacent, known ordering. */
+static inline void try_blk_merge(int q, int a, int b) {
+    uint64_t rq = rem_mask[q];
+    if (!((rq & (1ULL << a)) && (rq & (1ULL << b)))) return;
+
+    /* Check adjacency */
+    int nc_a = nbr_count[q][a];
+    int adj = (nc_a > 0 && nbr_data[q][a][0] == b) ||
+              (nc_a > 1 && nbr_data[q][a][1] == b);
+    if (!adj) return;
+
+    /* Check ordering: who comes first? */
+    int a_before_b = (pred_mask[q][b] & (1ULL << a)) != 0;
+    int b_before_a = (pred_mask[q][a] & (1ULL << b)) != 0;
+    if (!a_before_b && !b_before_a) return; /* order unknown — defer */
+
+    int left_e, right_e;
+    if (a_before_b) { left_e = a; right_e = b; }
+    else            { left_e = b; right_e = a; }
+
+    /* left_e must be right endpoint of its block, right_e must be left endpoint */
+    if (blk_next[q][left_e] != -1) return;  /* already linked */
+    if (blk_prev[q][right_e] != -1) return;
+
+    /* Link chains */
+    int ll = blk_other_end[q][left_e];   /* left end of left block */
+    int rr = blk_other_end[q][right_e];  /* right end of right block */
+
+    blk_next[q][left_e] = right_e;
+    blk_prev[q][right_e] = left_e;
+    blk_other_end[q][ll] = rr;
+    blk_other_end[q][rr] = ll;
+
+    BlkTrailEntry *te = &blk_trail[blk_trail_len++];
+    te->p = q; te->a = left_e; te->b = right_e;
+    te->ll = ll; te->rr = rr;
 }
 
 /* ── Global state ─────────────────────────────────────────────── */
@@ -259,8 +329,8 @@ static int get_left_candidates(int p, int *cands) {
         int e = __builtin_ctzll(mask);
         mask &= mask - 1;
 
-        if (!is_block_endpoint(p, e))
-            continue;
+        { int prev = blk_prev[p][e];
+          if (prev != -1 && (rp & (1ULL << prev))) continue; } /* not left endpoint */
         if (!can_add_adj(p, f, e) || !can_add_adj(f, p, e) || !can_add_adj(e, p, f))
             continue;
 
@@ -285,8 +355,8 @@ static int get_right_candidates(int p, int *cands) {
         int e = __builtin_ctzll(mask);
         mask &= mask - 1;
 
-        if (!is_block_endpoint(p, e))
-            continue;
+        { int next = blk_next[p][e];
+          if (next != -1 && (rp & (1ULL << next))) continue; } /* not right endpoint */
         if (!can_add_adj(p, e, f) || !can_add_adj(e, p, f) || !can_add_adj(f, p, e))
             continue;
 
@@ -579,7 +649,7 @@ static void store_result(void) {
 /* ── solve ────────────────────────────────────────────────────── */
 
 typedef struct {
-    int p; int e; int cmk; int amk; int omk;
+    int p; int e; int cmk; int amk; int omk; int bmk;
     int side;
 } ForcedEntry;
 
@@ -608,11 +678,21 @@ static void solve(void) {
 
     int lcands[N_MAX], rcands[N_MAX];
 
-    /* Unit propagation */
+    /* Unit propagation + MRV selection in one pass */
+    int best_p = -1, best_count = N_MAX * 2, best_side = 0;
+    int best_cands[N_MAX];
+    int best_nc = 0;
+    int has_incomplete = 0;
+
     while (!contradiction) {
         int found_forced = 0;
+        best_p = -1;
+        best_count = N_MAX * 2;
+        has_incomplete = 0;
+
         for (int p = 1; p < n; p++) {
             if (rem_mask[p] == 0) continue;
+            has_incomplete = 1;
             int nlc = get_left_candidates(p, lcands);
             int nrc = get_right_candidates(p, rcands);
             int total = nlc + nrc;
@@ -634,12 +714,14 @@ static void solve(void) {
                 int cmk = chi_mark();
                 int amk = adj_mark();
                 int omk = ord_mark();
+                int bmk = blk_mark();
                 int fi = forced_base + forced_count;
                 forced_stack[fi].p = p;
                 forced_stack[fi].e = e;
                 forced_stack[fi].cmk = cmk;
                 forced_stack[fi].amk = amk;
                 forced_stack[fi].omk = omk;
+                forced_stack[fi].bmk = bmk;
                 forced_stack[fi].side = side;
                 forced_count++;
                 forced_stack_top++;
@@ -651,27 +733,8 @@ static void solve(void) {
                 }
                 break;
             }
-        }
-        if (!found_forced)
-            break;
-    }
 
-    /* Find branching hyperline */
-    int best_p = -1, best_count = N_MAX * 2, best_side = 0;
-    int best_cands[N_MAX];
-    int best_nc = 0;
-
-    if (!contradiction) {
-        int has_incomplete = 0;
-        for (int p = 1; p < n; p++) {
-            if (rem_mask[p] == 0) continue;
-            has_incomplete = 1;
-            int nlc = get_left_candidates(p, lcands);
-            int nrc = get_right_candidates(p, rcands);
-            if (nlc + nrc == 0) {
-                contradiction = 1;
-                break;
-            }
+            /* Track MRV for branching (only in the final no-forced round) */
             int nc, sd;
             int *src;
             if (nlc > 0) { nc = nlc; sd = 0; src = lcands; }
@@ -684,16 +747,19 @@ static void solve(void) {
                 memcpy(best_cands, src, nc * sizeof(int));
             }
         }
-        if (!contradiction && !has_incomplete) {
-            int exp_tri = n * (n - 1) / 3;
-            int tri = extract_tri_count();
-            if (tri == exp_tri) {
-                store_result();
-                result_count++;
-                if (verbose)
-                    fprintf(stderr, "  FOUND #%d (%lld nodes, %d tri)\n",
-                            result_count, node_count, tri);
-            }
+        if (!found_forced)
+            break;
+    }
+
+    if (!contradiction && !has_incomplete) {
+        int exp_tri = n * (n - 1) / 3;
+        int tri = extract_tri_count();
+        if (tri == exp_tri) {
+            store_result();
+            result_count++;
+            if (verbose)
+                fprintf(stderr, "  FOUND #%d (%lld nodes, %d tri)\n",
+                        result_count, node_count, tri);
         }
     }
 
@@ -710,6 +776,7 @@ static void solve(void) {
             int cmk = chi_mark();
             int amk = adj_mark();
             int omk = ord_mark();
+            int bmk = blk_mark();
             int ok = best_side == 0 ? place_left(best_p, e) : place_right(best_p, e);
             if (ok)
                 solve();
@@ -718,6 +785,7 @@ static void solve(void) {
             chi_undo(cmk);
             adj_undo(amk);
             ord_undo(omk);
+            blk_undo(bmk);
         }
     }
 
@@ -731,6 +799,7 @@ static void solve(void) {
         chi_undo(forced_stack[fi].cmk);
         adj_undo(forced_stack[fi].amk);
         ord_undo(forced_stack[fi].omk);
+        blk_undo(forced_stack[fi].bmk);
     }
     forced_stack_top = forced_base;
 }
@@ -753,6 +822,13 @@ static int generate(int n, int max_results) {
     memset(pred_mask, 0, sizeof(pred_mask));
     memset(succ_mask, 0, sizeof(succ_mask));
     ord_trail_len = 0;
+    memset(blk_next, -1, sizeof(blk_next));
+    memset(blk_prev, -1, sizeof(blk_prev));
+    /* blk_other_end: each element is its own block, so other_end = self */
+    for (int p = 0; p <= N_MAX; p++)
+        for (int e = 0; e <= N_MAX; e++)
+            blk_other_end[p][e] = e;
+    blk_trail_len = 0;
 
     /* Build hn */
     hn_len = 0;
