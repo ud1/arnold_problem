@@ -75,6 +75,41 @@ struct Params {
     std::vector<double> x;
 };
 
+struct Boost {
+    std::vector<size_t> ans_iters;
+    std::vector<size_t> ens_iters;
+
+    void inc_ens(size_t i) {
+        ens_iters[i]++;
+    }
+    void dec_ens(size_t i) {
+        if (ens_iters[i] > 0)
+            ens_iters[i]--;
+    }
+    double val_ens(size_t i) const {
+        size_t v = ens_iters[i];
+        if (v == 0)
+            return 1.0;
+
+        return 10.0 * (double) v / ((double) v + 100.0) + 1.0;
+    }
+
+    void inc_ans(size_t i) {
+        ans_iters[i]++;
+    }
+    void dec_ans(size_t i) {
+        if (ans_iters[i] > 0)
+            ans_iters[i]--;
+    }
+    double val_ans(size_t i) const {
+        size_t v = ans_iters[i];
+        if (v == 0)
+            return 1.0;
+
+        return 10.0 * (double) v / ((double) v + 50.0) + 1.0;
+    }
+};
+
 struct LossAndGrad {
     double loss;
     double pure_loss;
@@ -130,7 +165,7 @@ struct Results {
 struct Problem {
     std::vector<EdgeTerm> edgeTerms;
     std::vector<std::pair<size_t, size_t>> extreme_points;
-    double angle_func_scale = 1000.0;
+    double angle_func_scale = 5000.0;
     double angle_func_scale2;
 };
 
@@ -168,8 +203,34 @@ void retransform_x(Params &p) {
     }
 }
 
-typedef void (*compute_loss_and_grad_func)(LossAndGrad &res, const Params &params, const Problem &p);
-void compute_loss_and_grad_initial(LossAndGrad &res, const Params &params, const Problem &p) {
+typedef void (*compute_loss_and_grad_func)(LossAndGrad &res, const Params &params, const Problem &p, const Boost &b);
+
+void update_boost(const Params &params, const Problem &p, Boost &b) {
+    size_t n = params.m.size();
+    for (size_t i = 0; i < n-1; ++i) {
+        double dm = params.m[i + 1] - params.m[i];
+        if (dm > 0.0) {
+            b.inc_ans(i);
+        }
+        else {
+            b.dec_ans(i);
+        }
+    }
+
+    size_t i = 0;
+    for (auto &t : p.edgeTerms) {
+        double dm = ((params.x[t.j] - params.x[t.i]) * (params.m[t.i] - params.m[t.k]) - (params.x[t.k] - params.x[t.i]) * (params.m[t.i] - params.m[t.j]))*t.sign;
+        if (dm >= 0.0) {
+            b.inc_ens(i);
+        }
+        else {
+            b.dec_ens(i);
+        }
+        ++i;
+    }
+}
+
+void compute_loss_and_grad_initial(LossAndGrad &res, const Params &params, const Problem &p, const Boost &b) {
     res.reset();
 
     size_t n = params.m.size();
@@ -178,29 +239,32 @@ void compute_loss_and_grad_initial(LossAndGrad &res, const Params &params, const
         if (dm > 0.0) {
             res.solved = false;
             res.ans++;
-            res.pure_loss += dm * dm * p.angle_func_scale;
+            res.pure_loss += dm * dm * 5000.0;
         }
         dm += MIN_ANGLE;
         if (dm > 0.0) {
-            res.loss += dm*dm * p.angle_func_scale;
-            double g = 2.0*dm * p.angle_func_scale;
+            double boost = b.val_ans(i);
+            res.loss += dm*dm * p.angle_func_scale*boost;
+            double g = 2.0*dm * p.angle_func_scale*boost;
             res.grad_m[i] -= g;
             res.grad_m[i + 1] += g;
         }
     }
 
+    size_t i = 0;
     for (auto &t : p.edgeTerms) {
         double dm = ((params.x[t.j] - params.x[t.i]) * (params.m[t.i] - params.m[t.k]) - (params.x[t.k] - params.x[t.i]) * (params.m[t.i] - params.m[t.j]))*t.sign;
-        if (dm > 0.0) {
+        if (dm >= 0.0) {
             res.solved = false;
             res.ens++;
             res.pure_loss += dm * dm;
         }
         dm += MIN_EDGE;
         if (dm > 0.0) {
-            res.loss += dm*dm;
+            double boost = b.val_ens(i);
+            res.loss += dm*dm*boost;
 
-            double val = dm * 2.0;
+            double val = dm * 2.0 * boost;
             double b1 = (params.x[t.j] - params.x[t.i]) * t.sign;
             double b2 = (params.x[t.k] - params.x[t.i]) * t.sign;
 
@@ -215,10 +279,12 @@ void compute_loss_and_grad_initial(LossAndGrad &res, const Params &params, const
             res.grad_x[t.j] += val * a;
             res.grad_x[t.k] -= val * b;
         }
+
+        ++i;
     }
 }
 
-void compute_loss_and_grad_enhance(LossAndGrad &res, const Params &params, const Problem &p) {
+void compute_loss_and_grad_enhance(LossAndGrad &res, const Params &params, const Problem &p, const Boost &b) {
     res.reset();
 
     size_t n = params.m.size();
@@ -406,19 +472,19 @@ void init(const OMatrix &o, Params &params, Problem &p) {
     }
 }
 
-// double eval_loss_only(const Params &params, const Problem &p, compute_loss_and_grad_func compute_loss_and_grad) {
+// double eval_loss_only(const Params &params, const Problem &p, compute_loss_and_grad_func compute_loss_and_grad, Boost &b) {
 //     LossAndGrad tmp;
 //     tmp.init(params);
-//     compute_loss_and_grad(tmp, params, p);
+//     compute_loss_and_grad(tmp, params, p, b);
 //     return tmp.loss;
 // }
 //
-// void check_grad(const Params &params, const Problem &p, compute_loss_and_grad_func compute_loss_and_grad) {
+// void check_grad(const Params &params, const Problem &p, compute_loss_and_grad_func compute_loss_and_grad, Boost &b) {
 //     const double eps = 1e-7;
 //
 //     LossAndGrad lg;
 //     lg.init(params);
-//     compute_loss_and_grad(lg, params, p);
+//     compute_loss_and_grad(lg, params, p, b);
 //
 //     for (size_t i = 0; i < params.m.size(); ++i) {
 //         Params p1 = params;
@@ -427,8 +493,8 @@ void init(const OMatrix &o, Params &params, Problem &p) {
 //         p1.m[i] += eps;
 //         p2.m[i] -= eps;
 //
-//         double f1 = eval_loss_only(p1, p, compute_loss_and_grad);
-//         double f2 = eval_loss_only(p2, p, compute_loss_and_grad);
+//         double f1 = eval_loss_only(p1, p, compute_loss_and_grad, b);
+//         double f2 = eval_loss_only(p2, p, compute_loss_and_grad, b);
 //
 //         double num = (f1 - f2) / (2.0 * eps);
 //         double ana = lg.grad_m[i];
@@ -447,8 +513,8 @@ void init(const OMatrix &o, Params &params, Problem &p) {
 //         p1.x[i] += eps;
 //         p2.x[i] -= eps;
 //
-//         double f1 = eval_loss_only(p1, p, compute_loss_and_grad);
-//         double f2 = eval_loss_only(p2, p, compute_loss_and_grad);
+//         double f1 = eval_loss_only(p1, p, compute_loss_and_grad, b);
+//         double f2 = eval_loss_only(p2, p, compute_loss_and_grad, b);
 //
 //         double num = (f1 - f2) / (2.0 * eps);
 //         double ana = lg.grad_x[i];
@@ -461,7 +527,7 @@ void init(const OMatrix &o, Params &params, Problem &p) {
 //     }
 // }
 
-Results solve(size_t iters, const Problem &p, Params &params, compute_loss_and_grad_func compute_loss_and_grad, bool enhance) {
+Results solve(size_t iters, const Problem &p, Params &params, compute_loss_and_grad_func compute_loss_and_grad, Boost &b, bool enhance) {
     LossAndGrad lg1, lg2;
     lg1.init(params);
     lg2.init(params);
@@ -474,7 +540,8 @@ Results solve(size_t iters, const Problem &p, Params &params, compute_loss_and_g
 
     double step = 0.01;
 
-    compute_loss_and_grad(*prev_lg, params, p);
+    update_boost(params, p, b);
+    compute_loss_and_grad(*prev_lg, params, p, b);
 
     for (; results.iters < iters; ++results.iters) {
         double g2 = prev_lg->g2();
@@ -487,7 +554,8 @@ Results solve(size_t iters, const Problem &p, Params &params, compute_loss_and_g
         sp = params;
 
         bool accepted = false;
-        for (int bt = 0; bt < 1000; ++bt) {
+        int bt = 0;
+        for (; bt < 1000; ++bt) {
             for (size_t i = 0; i < params.m.size(); ++i) {
                 params.m[i] = sp.m[i] - step * prev_lg->grad_m[i];
             }
@@ -495,7 +563,7 @@ Results solve(size_t iters, const Problem &p, Params &params, compute_loss_and_g
                 params.x[i] = sp.x[i] - step * prev_lg->grad_x[i];
             }
 
-            compute_loss_and_grad(*new_lg, params, p);
+            compute_loss_and_grad(*new_lg, params, p, b);
 
             if (!enhance || new_lg->solved) {
                 if (new_lg->loss - prev_lg->loss <= -0.5 * step * g2) {
@@ -504,10 +572,11 @@ Results solve(size_t iters, const Problem &p, Params &params, compute_loss_and_g
                 }
             }
 
+            ++results.iters;
             step *= 0.5;
             if (step < 1e-100) {
                 results.lg = *prev_lg;
-                // check_grad(params, p, compute_loss_and_grad);
+                // check_grad(params, p, compute_loss_and_grad, b);
                 return results;
             }
         }
@@ -540,7 +609,7 @@ Results solve(size_t iters, const Problem &p, Params &params, compute_loss_and_g
             yty += yx * yx;
         }
 
-        if (results.iters % 2 == 1) {
+        if (bt < 3) {
             // long BB: alpha = (s^T s) / (s^T y)
             if (sty > 1e-30) {
                 step = sts / sty;
@@ -557,6 +626,10 @@ Results solve(size_t iters, const Problem &p, Params &params, compute_loss_and_g
         }
 
         std::swap(prev_lg, new_lg);
+
+        if (!enhance && prev_lg->solved) {
+            break;
+        }
     }
 
     results.lg = *prev_lg;
@@ -578,11 +651,14 @@ struct Stretch {
     }
 
     void stretch() {
-        double prev_pure_loss = -1.0;
+        Boost b;
+        b.ens_iters.resize(problem.edgeTerms.size(), 0.0);
+        b.ans_iters.resize(o.n - 1, 0.0);
 
-        const size_t ITERS = 100000;
+        std::vector<double> values;
+        const size_t ITERS = 20000;
         for (;;) {
-            Results results = solve(ITERS, problem, params, compute_loss_and_grad_initial, false);
+            Results results = solve(ITERS, problem, params, compute_loss_and_grad_initial, b, false);
             res.iters += results.iters;
             res.lg = results.lg;
             if (results.lg.solved) {
@@ -593,31 +669,39 @@ struct Stretch {
                 return;
             }
 
-            if (results.iters >= config.max_steps) {
+            if (res.iters >= config.max_steps) {
                 return;
             }
 
             if (config.verbose)
-                std::cout << results.lg.pure_loss << " ENS " << results.lg.ens << " ANS " << results.lg.ans << std::endl;
+                std::cout << results.lg.pure_loss << " ENS " << results.lg.ens << " ANS " << results.lg.ans << " " << results.lg.g2() << std::endl;
 
-            if (prev_pure_loss > 0.0) {
-                double d = (prev_pure_loss - results.lg.pure_loss) / prev_pure_loss;
-                if (d < config.min_decay)
-                    return;
+            values.push_back(res.lg.pure_loss);
+            if (values.size() >= 5) {
+                int start = (int) values.size() - 5;
+                double max_v = *std::max_element(values.begin() + start, values.end());
+                double min_v = *std::min_element(values.begin() + start, values.end());
+                double dv = (max_v - min_v) / (max_v + 0.00001);
+
+                if (dv < config.min_decay) {
+                    break;
+                }
             }
-
-            prev_pure_loss = results.lg.pure_loss;
         }
     }
 
     void enhance() {
+        Boost b;
+        b.ens_iters.resize(problem.edgeTerms.size(), 0.0);
+        b.ans_iters.resize(o.n - 1, 0.0);
+
         retransform_m(params);
         retransform_x(params);
 
         const size_t ITERS = 100000;
         const size_t MAX_I = (config.enhance_steps + ITERS - 1) / ITERS;
         for (size_t i = 0; i < MAX_I; ++i) {
-            Results results = solve(ITERS, problem, params, compute_loss_and_grad_enhance, true);
+            Results results = solve(ITERS, problem, params, compute_loss_and_grad_enhance, b, true);
             if (config.verbose)
                 std::cout << "E " << results.lg.loss << std::endl;
             res.iters += results.iters;
@@ -705,7 +789,7 @@ int main(int argc, char **argv) {
         std::cout << "RES:" << s.res.lg.solved << std::endl;
         std::cout << "PVAL:" << s.res.lg.pure_loss << std::endl;
         std::cout << "STEPS:" << s.res.iters << std::endl;
-        std::cout << "N:" << s.o.n << std::endl;
+        // std::cout << "N:" << s.o.n << std::endl;
 
         if (s.res.lg.solved) {
             if (terms_config.enhance) {
