@@ -537,7 +537,7 @@ public class OMatrix
 
         boolean right = lineIntersections.get(0).get(halfN - 1) > lineIntersections.get(0).get(halfN);
 
-        int startGen = right ? 1 : 0;
+        int startGen = right == (halfN % 2 == 1) ? 1 : 0;
         for (int i = 0; i < numLines; ++i)
         {
             for (int g = startGen; g < numLines - 1; g += 2) {
