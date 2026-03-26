@@ -503,6 +503,9 @@ public class OMatrix
 
     public boolean equalsSphere(OMatrix oth)
     {
+        if (oth.equalsPlain(this))
+            return true;
+
         for (int i = 0; i < numLines; ++i)
         {
             OMatrix m = oth.sphereRotation(i);
