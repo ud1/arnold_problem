@@ -54,6 +54,82 @@ OMatrixPtr OMatrix::rotate(Line rotation) const {
     return std::make_shared<const OMatrix>(new_intersections, new_parallels);
 }
 
+OMatrixPtr OMatrix::sphere_rotation(Line val) const {
+    if (n() % 2 == 0 || !parallels.empty())
+        return {};
+
+    if (val >= n())
+        return {};
+
+    Line numLines = n();
+
+    std::map<Line, Line> reord;
+    {
+        const std::vector<Line>& line = intersections[val];
+        for (Line i = 0; i < numLines - 1; ++i) {
+            reord[line[i]] = i;
+        }
+        reord[numLines] = numLines - 1;
+    }
+
+    std::vector<std::vector<Line>> temp(numLines + 1);
+    for (Line i = 0; i < numLines; ++i) {
+        std::vector<Line> line(intersections[i]);
+        line.push_back(numLines);
+        temp[i] = std::move(line);
+    }
+
+    {
+        std::vector<Line> line(numLines);
+        for (Line i = 0; i < numLines; ++i)
+            line[i] = i;
+        temp[numLines] = std::move(line);
+    }
+
+    std::vector<std::vector<Line>> new_intersections(numLines);
+    for (Line i = 0; i < numLines; ++i) {
+        std::vector<Line>& newLine = new_intersections[i];
+
+        Line v = temp[val][i];
+        const std::vector<Line>& tempLine = temp[v];
+        if (v < val) {
+            Line valPos = static_cast<Line>(-1);
+            for (Line j = 0; j < numLines; ++j) {
+                if (tempLine[j] == val) {
+                    valPos = j;
+                    break;
+                }
+            }
+
+            for (Line j = valPos; j --> 0;) {
+                newLine.push_back(reord[tempLine[j]]);
+            }
+
+            for (Line j = numLines; j --> valPos + 1;) {
+                newLine.push_back(reord[tempLine[j]]);
+            }
+        } else {
+            Line valPos = static_cast<Line>(-1);
+            for (Line j = 0; j < numLines; ++j) {
+                if (tempLine[j] == val) {
+                    valPos = j;
+                    break;
+                }
+            }
+
+            for (Line j = valPos + 1; j < numLines; ++j) {
+                newLine.push_back(reord[tempLine[j]]);
+            }
+
+            for (Line j = 0; j < valPos; ++j) {
+                newLine.push_back(reord[tempLine[j]]);
+            }
+        }
+    }
+
+    return std::make_shared<OMatrix>(new_intersections, std::map<Line, Line>{});
+}
+
 std::vector<Line> OMatrix::get_generators() const {
     std::vector<Line> lines;
     std::vector<Line> pos;
@@ -156,6 +232,39 @@ OMatrixPtr OMatrix::min_o() const {
     return result;
 }
 
+OMatrixPtr OMatrix::min_po() const {
+    if (cached_min_po)
+        return cached_min_po;
+
+    if (is_min_po) {
+        return shared_from_this();
+    }
+
+
+    OMatrixPtr result = min_o();
+    uint64_t best_hash = result->hash();
+
+    for (Line i = 0; i < n(); ++i) {
+        auto oth = sphere_rotation(i);
+        if (oth) {
+            oth = oth->min_o();
+        }
+
+        if (oth) {
+            auto hash = oth->hash();
+            if (best_hash > hash) {
+                best_hash = hash;
+                result = oth;
+            }
+        }
+    }
+
+    result->is_min_po = true;
+    if (!result->is_min_po) // is not self
+        cached_min_po = result;
+    return result;
+}
+
 uint64_t OMatrix::hash() const {
     if (cached_hash.has_value())
         return *cached_hash;
@@ -230,6 +339,20 @@ std::string OMatrix::get_eid() const {
     OMatrixPtr mo = min_o();
     if (mo) {
         result += "E";
+        result += std::to_string(mo->n());
+        result += "_";
+        result += base36_encode(mo->hash());
+    }
+
+    return result;
+}
+
+std::string OMatrix::get_pid() const {
+    std::string result;
+
+    OMatrixPtr mo = min_po();
+    if (mo) {
+        result += "P";
         result += std::to_string(mo->n());
         result += "_";
         result += base36_encode(mo->hash());

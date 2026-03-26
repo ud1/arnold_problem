@@ -33,11 +33,13 @@ struct OMatrix : std::enable_shared_from_this<OMatrix> {
     Line get_line_len(Line rotation, Line i) const;
     Line rotate_line_num(Line rotation, Line l) const;
     OMatrixPtr rotate(Line rotation) const;
+    OMatrixPtr sphere_rotation(Line val) const;
     size_t get_num_vertices() const;
     std::vector<Line> get_generators() const;
     OMatrixPtr mirror() const;
     uint64_t hash() const;
     OMatrixPtr min_o() const;
+    OMatrixPtr min_po() const;
     OMatrixPtr remove_lines(std::set<Line> lines) const;
     bool operator==(const OMatrix& other) const {
         return intersections == other.intersections;
@@ -48,12 +50,15 @@ struct OMatrix : std::enable_shared_from_this<OMatrix> {
     }
 
     [[nodiscard]] std::string get_eid() const;
+    [[nodiscard]] std::string get_pid() const;
 private:
     std::vector<std::vector<Line>> intersections;
     std::map<Line, Line> parallels;
     mutable std::optional<uint64_t> cached_hash;
     mutable OMatrixPtr cached_min_o;
+    mutable OMatrixPtr cached_min_po;
     mutable bool is_min_o = false;
+    mutable bool is_min_po = false;
 };
 
 namespace std {

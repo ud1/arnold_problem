@@ -16,6 +16,12 @@ struct Configuration {
             return {};
         return o->min_o();
     }
+
+    [[nodiscard]] OMatrixPtr get_min_po() const {
+        if (!o)
+            return {};
+        return o->min_po();
+    }
 };
 
 #endif //ARN_UTIL_CONF_HPP
