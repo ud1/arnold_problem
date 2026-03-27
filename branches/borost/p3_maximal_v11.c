@@ -48,6 +48,9 @@ static int blk_next[N_MAX+1][N_MAX+1];
 static int blk_prev[N_MAX+1][N_MAX+1];
 /* For endpoints: blk_other_end[p][e] = the other endpoint of e's block */
 static int blk_other_end[N_MAX+1][N_MAX+1];
+/* Bitmasks of block endpoints among remaining elements on hyperline p */
+static uint64_t blk_left_ep[N_MAX+1];   /* elements with blk_prev == -1 */
+static uint64_t blk_right_ep[N_MAX+1];  /* elements with blk_next == -1 */
 
 typedef struct { int16_t p, a, b, ll, rr; } BlkTrailEntry;
 static BlkTrailEntry blk_trail[N_MAX*N_MAX*N_MAX*4];
@@ -63,6 +66,8 @@ static void blk_undo(int mark) {
         blk_prev[e->p][e->b] = -1;
         blk_other_end[e->p][e->ll] = e->a;
         blk_other_end[e->p][e->rr] = e->b;
+        blk_right_ep[e->p] |= (1ULL << e->a);   /* a is right endpoint again */
+        blk_left_ep[e->p] |= (1ULL << e->b);    /* b is left endpoint again */
     }
 }
 
@@ -84,7 +89,7 @@ static int n_val;
 static int8_t sgn[N_MAX+1][N_MAX+1];
 static uint64_t rem_mask[N_MAX+1];
 
-static inline void try_blk_merge(int q, int a, int b);
+static inline int try_blk_merge(int q, int a, int b);
 
 /* Update ordering masks when chi_v[h][a][b] is newly set to val_hab */
 static inline void update_ordering(int h, int a, int b, int val_hab) {
@@ -210,7 +215,7 @@ static int add_adj(int q, int a, int b) {
         adj_trail[idx*2+1] = b;
         adj_trail_len++;
     }
-    try_blk_merge(q, a, b);
+    if (!try_blk_merge(q, a, b)) return 0;
     return 1;
 }
 
@@ -230,28 +235,29 @@ static int can_add_adj(int q, int a, int b) {
 
 /* Try to merge blocks of a and b on hyperline q.
  * Requires: both in rem_mask, known adjacent, known ordering. */
-static inline void try_blk_merge(int q, int a, int b) {
+/* Returns 0 on contradiction (no left or right endpoints remain) */
+static inline int try_blk_merge(int q, int a, int b) {
     uint64_t rq = rem_mask[q];
-    if (!((rq & (1ULL << a)) && (rq & (1ULL << b)))) return;
+    if (!((rq & (1ULL << a)) && (rq & (1ULL << b)))) return 1;
 
     /* Check adjacency */
     int nc_a = nbr_count[q][a];
-    int adj = (nc_a > 0 && nbr_data[q][a][0] == b) ||
-              (nc_a > 1 && nbr_data[q][a][1] == b);
-    if (!adj) return;
+    int is_adj = (nc_a > 0 && nbr_data[q][a][0] == b) ||
+                 (nc_a > 1 && nbr_data[q][a][1] == b);
+    if (!is_adj) return 1;
 
     /* Check ordering: who comes first? */
     int a_before_b = (pred_mask[q][b] & (1ULL << a)) != 0;
     int b_before_a = (pred_mask[q][a] & (1ULL << b)) != 0;
-    if (!a_before_b && !b_before_a) return; /* order unknown — defer */
+    if (!a_before_b && !b_before_a) return 1; /* order unknown — defer */
 
     int left_e, right_e;
     if (a_before_b) { left_e = a; right_e = b; }
     else            { left_e = b; right_e = a; }
 
     /* left_e must be right endpoint of its block, right_e must be left endpoint */
-    if (blk_next[q][left_e] != -1) return;  /* already linked */
-    if (blk_prev[q][right_e] != -1) return;
+    if (blk_next[q][left_e] != -1) return 1;  /* already linked */
+    if (blk_prev[q][right_e] != -1) return 1;
 
     /* Link chains */
     int ll = blk_other_end[q][left_e];   /* left end of left block */
@@ -261,10 +267,14 @@ static inline void try_blk_merge(int q, int a, int b) {
     blk_prev[q][right_e] = left_e;
     blk_other_end[q][ll] = rr;
     blk_other_end[q][rr] = ll;
+    blk_right_ep[q] &= ~(1ULL << left_e);   /* left_e no longer right endpoint */
+    blk_left_ep[q] &= ~(1ULL << right_e);   /* right_e no longer left endpoint */
 
     BlkTrailEntry *te = &blk_trail[blk_trail_len++];
     te->p = q; te->a = left_e; te->b = right_e;
     te->ll = ll; te->rr = rr;
+
+    return 1;
 }
 
 /* ── Global state ─────────────────────────────────────────────── */
@@ -330,7 +340,7 @@ static int get_left_candidates(int p, int *cands) {
         mask &= mask - 1;
 
         { int prev = blk_prev[p][e];
-          if (prev != -1 && (rp & (1ULL << prev))) continue; } /* not left endpoint */
+          if (prev != -1 && (rp & (1ULL << prev))) continue; }
         if (!can_add_adj(p, f, e) || !can_add_adj(f, p, e) || !can_add_adj(e, p, f))
             continue;
 
@@ -356,7 +366,7 @@ static int get_right_candidates(int p, int *cands) {
         mask &= mask - 1;
 
         { int next = blk_next[p][e];
-          if (next != -1 && (rp & (1ULL << next))) continue; } /* not right endpoint */
+          if (next != -1 && (rp & (1ULL << next))) continue; }
         if (!can_add_adj(p, e, f) || !can_add_adj(e, p, f) || !can_add_adj(f, p, e))
             continue;
 
@@ -887,6 +897,8 @@ static int generate(int n, int max_results) {
             mask |= 1ULL << q;
         }
         rem_mask[p] = mask;
+        blk_left_ep[p] = mask;
+        blk_right_ep[p] = mask;
     }
 
     /* Initial chi values — these will trigger update_ordering via chi_put */
