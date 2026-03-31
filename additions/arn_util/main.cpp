@@ -19,6 +19,7 @@ struct Params {
     bool mirror = false;
     bool uniq = false;
     bool sph_uniq = false;
+    bool move_last_to_inf = false;
     bool add = false;
     std::string run;
     std::vector<std::string> print;
@@ -77,6 +78,16 @@ struct Processor {
 
         if (params.mirror) {
             conf.o = conf.o->mirror();
+            matrix_updated = true;
+        }
+
+        if (params.move_last_to_inf) {
+            auto new_o = conf.o->move_last_line_to_infinity();
+            if (!new_o) {
+                std::cout << "#INVALID MOVE TO INFINITY COMMAND" << std::endl;
+                return;
+            }
+            conf.o = new_o;
             matrix_updated = true;
         }
 
@@ -171,7 +182,7 @@ struct Processor {
 
         if (params.add) {
             confs_buf.push_back(conf);
-            if (confs_buf.size() > 100) {
+            if (confs_buf.size() > 1000) {
                 add_to_db(confs_buf);
                 confs_buf.clear();
             }
@@ -230,6 +241,11 @@ int main(int argc, char **argv) {
             .help("filter projectively (sphere) unique configurations")
             .flag()
             .store_into(params.sph_uniq);
+
+    program.add_argument("--mv_inf")
+        .help("Move last line to infinity for even configurations")
+        .flag()
+        .store_into(params.move_last_to_inf);
 
     program.add_argument("-a", "--add")
             .help("add configurations to DB")

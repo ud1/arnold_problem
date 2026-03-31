@@ -41,6 +41,7 @@ struct OMatrix : std::enable_shared_from_this<OMatrix> {
     OMatrixPtr min_o() const;
     OMatrixPtr min_po() const;
     OMatrixPtr remove_lines(std::set<Line> lines) const;
+    OMatrixPtr move_last_line_to_infinity() const;
     bool operator==(const OMatrix& other) const {
         return intersections == other.intersections;
     }

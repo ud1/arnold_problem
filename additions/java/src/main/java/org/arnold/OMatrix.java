@@ -225,6 +225,56 @@ public class OMatrix
         return new OMatrix(newLineIntersections, numLines, numVertices);
     }
 
+    public OMatrix moveLastLineToInfinity()
+    {
+        if (numLines % 2 == 1)
+            throw new RuntimeException("Only even configurations supported");
+
+        int n1 = numLines - 1;
+        ArrayList<ArrayList<Integer>> newLineIntersections = new ArrayList<>(n1);
+        for (int i = 0; i < n1; ++i)
+        {
+            newLineIntersections.add(new ArrayList<>());
+        }
+
+        Map<Integer, Integer> reindex = new HashMap<>();
+        {
+            ArrayList<Integer> lastLine = lineIntersections.get(n1);
+            for (int i = 0; i < lastLine.size(); ++i) {
+                reindex.put(lastLine.get(i), i);
+            }
+
+            if (parallels.get(n1) != null)
+            {
+                reindex.put(parallels.get(n1), lastLine.size());
+            }
+        }
+
+        int numVertices = 0;
+        for (int i = 0; i < n1; ++i)
+        {
+            ArrayList<Integer> line = lineIntersections.get(i);
+            ArrayList<Integer> newLine = newLineIntersections.get(reindex.get(i));
+            int ind = line.indexOf(n1);
+            for (int j = ind + 1; j < line.size(); ++j)
+            {
+                newLine.add(reindex.get(line.get(j)));
+            }
+            if (parallels.get(i) != null)
+            {
+                newLine.add(reindex.get(parallels.get(i)));
+            }
+            for (int j = 0; j < ind; ++j)
+            {
+                newLine.add(reindex.get(line.get(j)));
+            }
+
+            numVertices += newLine.size();
+        }
+
+        return new OMatrix(newLineIntersections, n1, numVertices / 2);
+    }
+
     public OMatrix reflect()
     {
         ArrayList<ArrayList<Integer>> lineIntersections = new ArrayList<>();
@@ -405,7 +455,7 @@ public class OMatrix
                 int left = lines[gen];
                 int right = lines[gen + 1];
                 if (pos[left] < lineIntersections.get(left).size() && pos[right] < lineIntersections.get(right).size()
-                        && lineIntersections.get(left).get(pos[left]).equals(right) && lineIntersections.get(right).get(pos[right]).equals(left))
+                    && lineIntersections.get(left).get(pos[left]).equals(right) && lineIntersections.get(right).get(pos[right]).equals(left))
                 {
                     pos[left]++;
                     pos[right]++;
@@ -503,6 +553,11 @@ public class OMatrix
 
     public boolean equalsSphere(OMatrix oth)
     {
+        if (numLines % 2 == 0)
+        {
+            return moveLastLineToInfinity().equalsSphere(oth.moveLastLineToInfinity());
+        }
+
         if (oth.equalsPlain(this))
             return true;
 
@@ -602,5 +657,19 @@ public class OMatrix
     public int hashCode()
     {
         return hash;
+    }
+
+    public long hash() {
+        long h = 0xcbf29ce484222325L;
+        long p = 0x100000001b3L;
+
+        for (ArrayList<Integer> line : lineIntersections) {
+            for (int v : line) {
+                h ^= v;
+                h *= p;
+            }
+        }
+
+        return h;
     }
 }

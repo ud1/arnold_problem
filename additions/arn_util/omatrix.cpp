@@ -240,6 +240,11 @@ OMatrixPtr OMatrix::min_po() const {
         return shared_from_this();
     }
 
+    if (n() % 2 == 0) {
+        auto v = move_last_line_to_infinity();
+        cached_min_po = v->min_po();
+        return cached_min_po;
+    }
 
     OMatrixPtr result = min_o();
     uint64_t best_hash = result->hash();
@@ -353,7 +358,7 @@ std::string OMatrix::get_pid() const {
     OMatrixPtr mo = min_po();
     if (mo) {
         result += "P";
-        result += std::to_string(mo->n());
+        result += std::to_string(mo->n() + 1);
         result += "_";
         result += base36_encode(mo->hash());
     }
@@ -377,7 +382,7 @@ OMatrixPtr OMatrix::remove_lines(std::set<Line> lines) const {
     std::vector<std::vector<Line>> new_intersections;
     for (Line i = 0; i < n; ++i) {
         if (line_inds[i].has_value()) {
-            auto old_row = intersections[i];
+            auto &old_row = intersections[i];
             std::vector<Line> new_row;
             for (auto l : old_row) {
                 if (line_inds[l].has_value())
@@ -394,6 +399,49 @@ OMatrixPtr OMatrix::remove_lines(std::set<Line> lines) const {
     }
 
     return std::make_shared<const OMatrix>(new_intersections, new_parallels);
+}
+
+OMatrixPtr OMatrix::move_last_line_to_infinity() const {
+    size_t n = intersections.size();
+    if (n % 2 == 1)
+        return {};
+
+    std::vector<std::vector<Line>> new_intersections;
+    new_intersections.resize(n - 1);
+    Line n1 = n - 1;
+    std::map<Line, Line> reindex;
+    {
+        auto &last_line = intersections[n1];
+        for (Line i = 0; i < last_line.size(); ++i) {
+            reindex[last_line[i]] = i;
+        }
+
+        auto last_p = parallels.find(n1);
+        if (last_p != parallels.end()) {
+            reindex[last_p->second] = last_line.size();
+        }
+    }
+
+    for (Line i = 0; i < n1; ++i) {
+        auto &old_row = intersections[i];
+        auto it = std::find(old_row.begin(), old_row.end(), n1);
+        std::vector<Line> &new_row = new_intersections[reindex[i]];
+        for (auto j = it + 1; j != old_row.end(); ++j) {
+            auto v = *j;
+            new_row.push_back(reindex[v]);
+        }
+        auto p = parallels.find(n1);
+        if (p != parallels.end()) {
+            auto v = p->second;
+            new_row.push_back(reindex[p->second]);
+        }
+        for (auto j = old_row.begin(); j != it; ++j) {
+            auto v = *j;
+            new_row.push_back(reindex[v]);
+        }
+    }
+
+    return std::make_shared<const OMatrix>(new_intersections, std::map<Line, Line>());
 }
 
 const std::string B36_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz";
