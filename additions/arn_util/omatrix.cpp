@@ -55,7 +55,7 @@ OMatrixPtr OMatrix::rotate(Line rotation) const {
 }
 
 OMatrixPtr OMatrix::sphere_rotation(Line val) const {
-    if (n() % 2 == 0 || !parallels.empty())
+    if (!parallels.empty())
         return {};
 
     if (val >= n())
@@ -238,12 +238,6 @@ OMatrixPtr OMatrix::min_po() const {
 
     if (is_min_po) {
         return shared_from_this();
-    }
-
-    if (n() % 2 == 0) {
-        auto v = move_last_line_to_infinity();
-        cached_min_po = v->min_po();
-        return cached_min_po;
     }
 
     OMatrixPtr result = min_o();

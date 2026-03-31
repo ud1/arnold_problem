@@ -38,29 +38,6 @@ struct Processor {
     }
 
     void process(Configuration &&conf) {
-        if (params.sph_uniq) {
-            auto min_o = conf.get_min_po();
-            if (min_o) {
-                if (!o_set.count(min_o)) {
-                    o_set.insert(min_o);
-                }
-                else {
-                    return;
-                }
-            }
-        }
-        else if (params.uniq) {
-            auto min_o = conf.get_min_o();
-            if (min_o) {
-                if (!o_set.count(min_o)) {
-                    o_set.insert(min_o);
-                }
-                else {
-                    return;
-                }
-            }
-        }
-
         if (is_stopped())
             return;
 
@@ -113,6 +90,29 @@ struct Processor {
 
         if (matrix_updated) {
             conf.gens = conf.o->get_generators();
+        }
+
+        if (params.sph_uniq) {
+            auto min_o = conf.get_min_po();
+            if (min_o) {
+                if (!o_set.count(min_o)) {
+                    o_set.insert(min_o);
+                }
+                else {
+                    return;
+                }
+            }
+        }
+        else if (params.uniq) {
+            auto min_o = conf.get_min_o();
+            if (min_o) {
+                if (!o_set.count(min_o)) {
+                    o_set.insert(min_o);
+                }
+                else {
+                    return;
+                }
+            }
         }
 
         bool need_space = false;
