@@ -35,23 +35,28 @@ OMatrixPtr OMatrix::rotate(Line rotation) const {
         return {};
 
     std::vector<std::vector<Line>> new_intersections;
+    new_intersections.reserve(n());
+
     for (int i = 0; i < n(); ++i)
     {
-        std::vector<Line> line;
         Line len = get_line_len(rotation, i);
+
+        std::vector<Line> line;
+        line.reserve(len);
+
         for (Line j = 0; j < len; ++j)
         {
             line.push_back(get_val(rotation, i, j));
         }
-        new_intersections.push_back(line);
+        new_intersections.emplace_back(std::move(line));
     }
 
     std::map<Line, Line> new_parallels;
-    for (auto &p : parallels) {
+    for (const auto &p : parallels) {
         new_parallels[rotate_line_num(rotation, p.first)] = rotate_line_num(rotation, p.second);
     }
 
-    return std::make_shared<const OMatrix>(new_intersections, new_parallels);
+    return std::make_shared<const OMatrix>(std::move(new_intersections), std::move(new_parallels));
 }
 
 OMatrixPtr OMatrix::sphere_rotation(Line val) const {
@@ -80,14 +85,17 @@ OMatrixPtr OMatrix::sphere_rotation(Line val) const {
     }
 
     {
-        std::vector<Line> line(numLines);
-        for (Line i = 0; i < numLines; ++i)
-            line[i] = i;
+        std::vector<Line> line;
+        line.reserve(numLines);
+        for (Line i = 0; i < numLines; ++i) {
+            line.push_back(i);
+        }
         temp[numLines] = std::move(line);
     }
 
     std::vector<std::vector<Line>> new_intersections(numLines);
     for (Line i = 0; i < numLines; ++i) {
+        new_intersections[i].reserve(numLines - 1);
         std::vector<Line>& newLine = new_intersections[i];
 
         Line v = temp[val][i];
@@ -127,12 +135,14 @@ OMatrixPtr OMatrix::sphere_rotation(Line val) const {
         }
     }
 
-    return std::make_shared<OMatrix>(new_intersections, std::map<Line, Line>{});
+    return std::make_shared<OMatrix>(std::move(new_intersections), std::map<Line, Line>{});
 }
 
 std::vector<Line> OMatrix::get_generators() const {
     std::vector<Line> lines;
+    lines.reserve(n());
     std::vector<Line> pos;
+    pos.reserve(n());
     for (int i = 0; i < n(); ++i)
     {
         lines.push_back(i);
@@ -142,6 +152,7 @@ std::vector<Line> OMatrix::get_generators() const {
     std::vector<Line> generators;
 
     size_t num_vertices = get_num_vertices();
+    generators.reserve(num_vertices);
     for (int i = 0; i < num_vertices; ++i)
     {
         bool found = false;
@@ -170,24 +181,30 @@ std::vector<Line> OMatrix::get_generators() const {
 }
 
 OMatrixPtr OMatrix::mirror() const {
+    Line nVal = n();
+
     std::vector<std::vector<Line>> new_intersections;
-    for (Line i = n(); i --> 0;)
+    new_intersections.reserve(nVal);
+
+    for (Line i = nVal; i --> 0;)
     {
         std::vector<Line> line;
+        line.reserve(intersections[i].size());
+
         for (auto &l : intersections[i])
         {
-            line.push_back(n() - 1 - l);
+            line.push_back(nVal - 1 - l);
         }
 
-        new_intersections.push_back(line);
+        new_intersections.emplace_back(std::move(line));
     }
 
     std::map<Line, Line> new_parallels;
     for (auto &p : parallels) {
-        new_parallels[n() - 1 - p.first] = n() - 1 - p.second;
+        new_parallels[nVal - 1 - p.first] = nVal - 1 - p.second;
     }
 
-    return std::make_shared<const OMatrix>(new_intersections, new_parallels);
+    return std::make_shared<const OMatrix>(std::move(new_intersections), std::move(new_parallels));
 }
 
 OMatrixPtr OMatrix::min_o() const {
@@ -227,7 +244,7 @@ OMatrixPtr OMatrix::min_o() const {
     }
 
     result->is_min_o = true;
-    if (!result->is_min_o) // is not self
+    if (!this->is_min_o) // is not self
         cached_min_o = result;
     return result;
 }
@@ -259,7 +276,7 @@ OMatrixPtr OMatrix::min_po() const {
     }
 
     result->is_min_po = true;
-    if (!result->is_min_po) // is not self
+    if (!this->is_min_po) // is not self
         cached_min_po = result;
     return result;
 }

@@ -170,11 +170,11 @@ std::string current_time_str () {
     return std::format("{:%Y-%m-%dT%H:%M:%S%z}", now);
 }
 
-void add_to_db(const std::vector<Configuration> &configurations) {
+void add_to_db(const std::vector<Configuration> &configurations, bool use_pid) {
     for (auto &c : configurations) {
         if (is_stopped())
             return;
-        auto _ = c.get_min_o();
+        auto _ = use_pid ? c.get_min_po() : c.get_min_o();
     }
 
     Db db = open_main_db();
@@ -186,8 +186,8 @@ void add_to_db(const std::vector<Configuration> &configurations) {
             return;
         }
 
-        OMatrixPtr mo = c.o->min_o();
-        std::string eid = c.o->get_eid();
+        OMatrixPtr mo = use_pid ? c.o->min_po() : c.o->min_o();
+        std::string eid = use_pid ? c.o->get_pid() : c.o->get_eid();
         std::string date_time = current_time_str();
 
         std::vector<Line> gens = mo->get_generators();

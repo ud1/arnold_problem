@@ -32,6 +32,7 @@ add_executable(arn_util main.cpp
         graceful_stop.cpp
         run_config.hpp
         run_config.cpp
-        blocking_queue.hpp)
+        blocking_queue.hpp
+        thread_pool.hpp)
 #target_include_directories(arn_util PUBLIC "${sqlite_SOURCE_DIR}")
 target_link_libraries(arn_util PRIVATE sqlite3 tiny-process-library::tiny-process-library)

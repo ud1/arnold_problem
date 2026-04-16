@@ -2,12 +2,15 @@
 #include <fstream>
 #include <unordered_set>
 #include <set>
+#include <future>
+#include <deque>
 
 #include "argparse.hpp"
 #include "conf.hpp"
 #include "db.hpp"
 #include "graceful_stop.hpp"
 #include "run_config.hpp"
+#include "thread_pool.hpp"
 
 struct Params {
     std::string ifile;
@@ -21,6 +24,7 @@ struct Params {
     bool sph_uniq = false;
     bool move_last_to_inf = false;
     bool add = false;
+    bool addp = false;
     std::string run;
     std::vector<std::string> print;
     std::string remove_lines;
@@ -180,10 +184,10 @@ struct Processor {
             }
         }
 
-        if (params.add) {
+        if (params.add || params.addp) {
             confs_buf.push_back(conf);
             if (confs_buf.size() > 1000) {
-                add_to_db(confs_buf);
+                add_to_db(confs_buf, params.addp);
                 confs_buf.clear();
             }
         }
@@ -191,8 +195,25 @@ struct Processor {
 
     void flush_db() {
         if (confs_buf.size() > 0) {
-            add_to_db(confs_buf);
+            add_to_db(confs_buf, params.addp);
             confs_buf.clear();
+        }
+    }
+};
+
+struct AsyncHolder {
+    Configuration conf;
+    std::future<void> handle;
+    AsyncHolder(ThreadPool &thread_pool, Configuration &&conf, bool sph_uniq): conf(std::move(conf)) {
+        if (sph_uniq) {
+            handle = thread_pool.enqueue([this]() {
+                auto _ = this->conf.get_min_po();
+            });
+        }
+        else {
+            handle = thread_pool.enqueue( [this]() {
+                auto _ = this->conf.get_min_o();
+            });
         }
     }
 };
@@ -252,6 +273,11 @@ int main(int argc, char **argv) {
             .flag()
             .store_into(params.add);
 
+    program.add_argument("--addp")
+            .help("add configurations to DB (using PID)")
+            .flag()
+            .store_into(params.addp);
+
     program.add_argument("-p", "--print")
             .help("print (gens, omatrix, n, k, pos, wire, wire_condensed, eid, pid, lf)")
             .nargs(1, 20)
@@ -289,6 +315,8 @@ int main(int argc, char **argv) {
             return -1;
         }
 
+        ThreadPool thread_pool = ThreadPool(params.concurrency > 1 ? params.concurrency : 0);
+        std::deque<AsyncHolder> asyncHolders;
         std::string line;
         int i = 0;
         while (std::getline(file, line) && !is_stopped()) {
@@ -304,11 +332,31 @@ int main(int argc, char **argv) {
                 return -1;
             }
 
-            if (!gens.empty())
-                processor.process(Configuration(i, gens));
+            if (!gens.empty()) {
+                if (params.concurrency > 1 && (params.uniq || params.sph_uniq)) {
+                    if (asyncHolders.size() >= params.concurrency) {
+                        asyncHolders.front().handle.get();
+                        processor.process(std::move(asyncHolders.front().conf));
+                        asyncHolders.pop_front();
+                    }
+                    asyncHolders.emplace_back(thread_pool, Configuration(i, gens), params.sph_uniq);
+                }
+                else {
+                    processor.process(Configuration(i, gens));
+                }
+            }
 
             if (params.line_num > 0)
                 break;
+
+            if (i % 10000 == 0) {
+                std::cerr << "PROCESSED: " << i << std::endl;
+            }
+        }
+
+        for (auto &c : asyncHolders) {
+            c.handle.get();
+            processor.process(std::move(c.conf));
         }
     }
     if (!params.gens.empty()) {
