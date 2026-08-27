@@ -1,0 +1,8 @@
+Build and run:
+trunk serve
+
+Release build:
+trunk build --release --public-url ./
+
+data files:
+https://github.com/ud1/kobon-solutions/tree/master/gallery/data
