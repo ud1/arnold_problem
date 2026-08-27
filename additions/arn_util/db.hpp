@@ -4,7 +4,11 @@
 #include "conf.hpp"
 #include "run_config.hpp"
 
-void add_to_db(const std::vector<Configuration> &configurations, bool use_pid);
+enum class AddType {
+    E, P, RAW
+};
+
+void add_to_db(const std::vector<Configuration> &configurations, AddType tp);
 void process(const RunConfig &run_command, size_t concurrency);
 
 #endif //ARN_UTIL_DB_HPP

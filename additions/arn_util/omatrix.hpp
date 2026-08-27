@@ -50,6 +50,7 @@ struct OMatrix : std::enable_shared_from_this<OMatrix> {
         return intersections;
     }
 
+    [[nodiscard]] std::string get_id() const;
     [[nodiscard]] std::string get_eid() const;
     [[nodiscard]] std::string get_pid() const;
 private:

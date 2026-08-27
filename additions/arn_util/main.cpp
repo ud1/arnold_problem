@@ -25,10 +25,23 @@ struct Params {
     bool move_last_to_inf = false;
     bool add = false;
     bool addp = false;
+    bool add_raw = false;
     std::string run;
     std::vector<std::string> print;
     std::string remove_lines;
 };
+
+AddType get_add_type(const Params &params) {
+    if (params.add) {
+        return AddType::E;
+    }
+
+    if (params.addp) {
+        return AddType::P;
+    }
+
+    return AddType::RAW;
+}
 
 struct Processor {
     Params params;
@@ -184,10 +197,10 @@ struct Processor {
             }
         }
 
-        if (params.add || params.addp) {
+        if (params.add || params.addp || params.add_raw) {
             confs_buf.push_back(conf);
             if (confs_buf.size() > 1000) {
-                add_to_db(confs_buf, params.addp);
+                add_to_db(confs_buf, get_add_type(params));
                 confs_buf.clear();
             }
         }
@@ -195,7 +208,7 @@ struct Processor {
 
     void flush_db() {
         if (confs_buf.size() > 0) {
-            add_to_db(confs_buf, params.addp);
+            add_to_db(confs_buf, get_add_type(params));
             confs_buf.clear();
         }
     }
@@ -277,6 +290,11 @@ int main(int argc, char **argv) {
             .help("add configurations to DB (using PID)")
             .flag()
             .store_into(params.addp);
+
+    program.add_argument("--add_raw")
+        .help("add configurations to DB (using ID)")
+        .flag()
+        .store_into(params.add_raw);
 
     program.add_argument("-p", "--print")
             .help("print (gens, omatrix, n, k, pos, wire, wire_condensed, eid, pid, lf)")

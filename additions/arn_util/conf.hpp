@@ -20,6 +20,7 @@ struct Configuration {
     [[nodiscard]] OMatrixPtr get_min_po() const {
         if (!o)
             return {};
+
         return o->min_po();
     }
 };

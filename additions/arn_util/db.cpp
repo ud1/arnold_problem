@@ -170,11 +170,11 @@ std::string current_time_str () {
     return std::format("{:%Y-%m-%dT%H:%M:%S%z}", now);
 }
 
-void add_to_db(const std::vector<Configuration> &configurations, bool use_pid) {
+void add_to_db(const std::vector<Configuration> &configurations, AddType tp) {
     for (auto &c : configurations) {
         if (is_stopped())
             return;
-        auto _ = use_pid ? c.get_min_po() : c.get_min_o();
+        auto _ = tp == AddType::P ? c.get_min_po() : tp == AddType::E ? c.get_min_o() : c.o;
     }
 
     Db db = open_main_db();
@@ -186,8 +186,8 @@ void add_to_db(const std::vector<Configuration> &configurations, bool use_pid) {
             return;
         }
 
-        OMatrixPtr mo = use_pid ? c.o->min_po() : c.o->min_o();
-        std::string eid = use_pid ? c.o->get_pid() : c.o->get_eid();
+        OMatrixPtr mo = tp == AddType::P ? c.get_min_po() : tp == AddType::E ? c.get_min_o() : c.o;
+        std::string eid = tp == AddType::P ? mo->get_pid() : tp == AddType::E ? mo->get_eid() : mo->get_id();
         std::string date_time = current_time_str();
 
         std::vector<Line> gens = mo->get_generators();
@@ -376,6 +376,8 @@ static std::string rtrim_newlines(std::string s) {
     return s;
 }
 
+int linGrad3_main(std::vector<std::string> params, std::ostringstream &out, std::ostringstream &err);
+
 static TaskResult run_one_task(const RunConfig &run_command, const SavedConf &saved_conf) {
     TaskResult tr;
     tr.eid = saved_conf.eid;
@@ -388,37 +390,161 @@ static TaskResult run_one_task(const RunConfig &run_command, const SavedConf &sa
 
     if (!run_command.transform.empty() && !is_stopped()) {
         auto tcmd = build_cmd(run_command.transform, saved_conf.gens);
-        auto t = run_capture(tcmd);
+        if (tcmd[0] == "int:rm") {
+            std::set<Line> remove_lines;
+            for (size_t i = 1; i < tcmd.size(); ++i)
+                remove_lines.insert(std::stoi(tcmd[i]));
 
-        if (is_stopped()) return tr;
+            auto o = get_OMatrix(numbers_str_to_vec(gens_for_command));
+            o = o->remove_lines(remove_lines);
+            auto gens = o->get_generators();
 
-        if (t.status != 0) {
-            tr.status = t.status;
-            tr.duration_ms = t.duration_ms;
-            tr.stderr_data = "Transform error. " + t.err;
-            tr.stdout_data = t.out;
-            return tr;
+            std::ostringstream out;
+            bool need_space = false;
+            for (auto g : gens) {
+                if (need_space) {
+                    out << " ";
+                }
+                out << g;
+                need_space = true;
+            }
+
+            gens_for_command = out.str();
         }
+        else {
+            auto t = run_capture(tcmd);
 
-        gens_for_command = rtrim_newlines(t.out);
-        if (gens_for_command.empty()) {
-            tr.status = 2;
-            tr.duration_ms = t.duration_ms;
-            tr.stderr_data = "Transform produced empty gens";
-            return tr;
+            if (is_stopped()) return tr;
+
+            if (t.status != 0) {
+                tr.status = t.status;
+                tr.duration_ms = t.duration_ms;
+                tr.stderr_data = "Transform error. " + t.err;
+                tr.stdout_data = t.out;
+                return tr;
+            }
+
+            gens_for_command = rtrim_newlines(t.out);
+            if (gens_for_command.empty()) {
+                tr.status = 2;
+                tr.duration_ms = t.duration_ms;
+                tr.stderr_data = "Transform produced empty gens";
+                return tr;
+            }
         }
     }
 
     auto cmd = build_cmd(run_command.command, gens_for_command);
-    auto r = run_capture(cmd);
+    if (run_command.command[0] == "int:linGrad3") {
+        std::ostringstream out;
+        std::ostringstream err;
+        double duration_ms = 0.0;
+        {
+            TimerElapsed t(duration_ms);
+            tr.status = linGrad3_main(cmd, out, err);
+        }
+        tr.stdout_data = out.str();
+        tr.stderr_data = err.str();
+        tr.duration_ms = duration_ms;
+    }
+    else {
+        auto r = run_capture(cmd);
 
-    tr.status = r.status;
-    tr.duration_ms = r.duration_ms;
-    tr.stdout_data = std::move(r.out);
-    tr.stderr_data = std::move(r.err);
+        tr.status = r.status;
+        tr.duration_ms = r.duration_ms;
+        tr.stdout_data = std::move(r.out);
+        tr.stderr_data = std::move(r.err);
+    }
+
     return tr;
 }
 
+struct BatchedTransaction {
+private:
+    sqlite3* db;
+    bool is_active;
+    std::chrono::steady_clock::time_point start_time;
+    std::chrono::milliseconds commit_delay;
+
+public:
+    explicit BatchedTransaction(sqlite3* db, std::chrono::milliseconds delay = std::chrono::seconds(5))
+        : db(db), is_active(false), commit_delay(delay) {}
+
+    void start() {
+        if (!is_active) {
+            exec_sql(db, "BEGIN TRANSACTION;");
+            is_active = true;
+            start_time = std::chrono::steady_clock::now();
+        }
+    }
+
+    void stop() {
+        if (!is_active) return;
+
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time);
+
+        if (elapsed >= commit_delay) {
+            commit();
+        }
+    }
+
+    void commit() {
+        if (is_active) {
+            try {
+                exec_sql(db, "COMMIT;");
+            } catch (const std::runtime_error& e) {
+                std::cerr << "COMMIT ERROR: " << e.what() << std::endl;
+                try {
+                    exec_sql(db, "ROLLBACK;");
+                } catch (...) {
+                }
+            }
+            is_active = false;
+        }
+    }
+
+    ~BatchedTransaction() {
+        if (is_active) {
+            try {
+                commit();
+            } catch (const std::runtime_error& e) {
+                std::cerr << "Destructor COMMIT ERROR: " << e.what() << std::endl;
+            }
+        }
+    }
+
+    // Запрещаем копирование, чтобы избежать двойного освобождения/коммита
+    BatchedTransaction(const BatchedTransaction&) = delete;
+    BatchedTransaction& operator=(const BatchedTransaction&) = delete;
+
+    // Разрешаем перемещение, если это необходимо
+    BatchedTransaction(BatchedTransaction&& other) noexcept
+        : db(other.db), is_active(other.is_active), start_time(other.start_time), commit_delay(other.commit_delay) {
+        other.is_active = false;
+        other.db = nullptr;
+    }
+
+    BatchedTransaction& operator=(BatchedTransaction&& other) noexcept {
+        if (this != &other) {
+            // Если текущая транзакция активна, нужно завершить её перед перемещением
+            if (is_active) {
+                try {
+                    commit();
+                } catch (...) {
+                    // Игнорируем ошибки при перемещении
+                }
+            }
+            db = other.db;
+            is_active = other.is_active;
+            start_time = other.start_time;
+            commit_delay = other.commit_delay;
+            other.is_active = false;
+            other.db = nullptr;
+        }
+        return *this;
+    }
+};
 
 void process(const RunConfig &run_command, size_t concurrency) {
     Db db = open_main_db();
@@ -460,6 +586,7 @@ void process(const RunConfig &run_command, size_t concurrency) {
 
     size_t finished = 0;
 
+    BatchedTransaction batched_transaction(db.get());
     while (finished < eids.size()) {
         if (is_stopped()) {
             break;
@@ -475,7 +602,7 @@ void process(const RunConfig &run_command, size_t concurrency) {
         {
             auto output_vals = parse_output(r.stdout_data, r.stderr_data);
 
-            Transaction transaction(db.get());
+            batched_transaction.start();
             auto insert_run = db.createStatement("INSERT INTO runs(name, eid, start_time, duration_ms, status) VALUES(?,?,?,?,?)");
             sqlite3_bind_text(insert_run.get(), 1, run_command.name.data(), run_command.name.size(), SQLITE_STATIC);
             sqlite3_bind_text(insert_run.get(), 2, r.eid.data(), r.eid.size(), SQLITE_STATIC);
@@ -494,6 +621,8 @@ void process(const RunConfig &run_command, size_t concurrency) {
                 insert_results.step();
                 sqlite3_reset(insert_results.get());
             }
+
+            batched_transaction.stop();
         }
 
         ++finished;

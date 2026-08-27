@@ -215,32 +215,21 @@ OMatrixPtr OMatrix::min_o() const {
         return shared_from_this();
     }
 
-    uint64_t best_hash = hash();
     OMatrixPtr result = shared_from_this();
 
     for (Line i = 1; i < 2 * n(); ++i)
     {
         auto r = rotate(i);
-        if (r) {
-            auto hash = r->hash();
-            if (best_hash > hash) {
-                best_hash = hash;
-                result = r;
-            }
-        }
+        if (r && r->intersections < result->intersections)
+            result = r;
     }
 
     OMatrixPtr mirrored = mirror();
     for (Line i = 0; i < 2 * n(); ++i)
     {
         auto r = mirrored->rotate(i);
-        if (r) {
-            auto hash = r->hash();
-            if (best_hash > hash) {
-                best_hash = hash;
-                result = r;
-            }
-        }
+        if (r && r->intersections < result->intersections)
+            result = r;
     }
 
     result->is_min_o = true;
@@ -258,7 +247,6 @@ OMatrixPtr OMatrix::min_po() const {
     }
 
     OMatrixPtr result = min_o();
-    uint64_t best_hash = result->hash();
 
     for (Line i = 0; i < n(); ++i) {
         auto oth = sphere_rotation(i);
@@ -266,12 +254,8 @@ OMatrixPtr OMatrix::min_po() const {
             oth = oth->min_o();
         }
 
-        if (oth) {
-            auto hash = oth->hash();
-            if (best_hash > hash) {
-                best_hash = hash;
-                result = oth;
-            }
+        if (oth && oth->intersections < result->intersections) {
+            result = oth;
         }
     }
 
@@ -349,6 +333,16 @@ Line OMatrix::get_parallels_ind(Line l) const {
 OMatrix::OMatrix(const std::vector<std::vector<Line>> &intersections, const std::map<Line, Line> &parallels)
         : intersections(intersections), parallels(parallels) {}
 
+std::string OMatrix::get_id() const {
+    std::string result;
+
+    result += std::to_string(n());
+    result += "-";
+    result += base36_encode(hash());
+
+    return result;
+}
+
 std::string OMatrix::get_eid() const {
     std::string result;
 
@@ -356,7 +350,7 @@ std::string OMatrix::get_eid() const {
     if (mo) {
         result += "E";
         result += std::to_string(mo->n());
-        result += "_";
+        result += "-";
         result += base36_encode(mo->hash());
     }
 
@@ -370,7 +364,7 @@ std::string OMatrix::get_pid() const {
     if (mo) {
         result += "P";
         result += std::to_string(mo->n() + 1);
-        result += "_";
+        result += "-";
         result += base36_encode(mo->hash());
     }
 
