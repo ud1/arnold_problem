@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use web_sys::{DomRect, Event, EventTarget, KeyboardEvent, MouseEvent, PointerEvent, TouchEvent, WheelEvent};
-use leptos::prelude::{event_target_value, Effect, Get, LocalResource, Memo, NodeRef, RwSignal, Set, Update};
+use leptos::prelude::{event_target_value, Get, LocalResource, Memo, NodeRef, RwSignal, Set, Update};
 use gloo_net::http::Request;
 use leptos::html::{Input};
 use leptos::logging::log;
@@ -447,22 +447,6 @@ impl ConfigurationsSelectorState {
         let selected_list_name = RwSignal::new(selected_list.clone());
         let selected_conf = RwSignal::new(selected_conf);
 
-        Effect::watch(
-            move || selected_list_name.get(),
-            move |_, _, _| {
-                selected_conf.set(String::new());
-            },
-            false,
-        );
-
-        Effect::watch(
-            move || (selected_list_name.get(), selected_conf.get()),
-            move |(l, c), _, _| {
-                update_url(l, c);
-            },
-            false,
-        );
-
         let all_confs = LocalResource::new(move || {
             let list_name = selected_list_name.get();
             async move {
@@ -546,9 +530,19 @@ impl ConfigurationsSelectorState {
     }
 
     pub fn select_series(&self, id: String) {
+        self.selected_conf.set(String::new());
         self.selected_list_name.set(id.clone());
-        self.filter.set(id);
+        self.filter.set(id.clone());
         self.hide_dropdown_and_blur();
+        update_url(&id, "");
+    }
+
+    pub fn apply_route(&self, list_name: String, conf_name: String) {
+        self.selected_list_name.set(list_name.clone());
+        self.selected_conf.set(conf_name);
+        self.filter.set(list_name.clone());
+        self.active_list_name.set(list_name);
+        self.is_dropdown_open.set(false);
     }
 
     fn hide_dropdown_and_blur(&self) {
@@ -619,9 +613,10 @@ impl ConfigurationsSelectorState {
                     self.open_dropdown(false);
                 }
                 else {
-                    self.selected_list_name.set(self.active_list_name.get());
-                    self.is_dropdown_open.set(false);
-                    self.filter.set(self.selected_list_name.get().clone());
+                    let active_list_name = self.active_list_name.get();
+                    if !active_list_name.is_empty() {
+                        self.select_series(active_list_name);
+                    }
                 }
             }
             "Escape" => {
@@ -636,39 +631,30 @@ impl ConfigurationsSelectorState {
     }
 }
 
-#[derive(Clone)]
-pub enum SelectedConf {
-    Visible(String),
-    Hidden(String),
-    None,
+fn parse_hash(hash: &str) -> (String, String) {
+    let hash = hash.strip_prefix('#').unwrap_or(hash);
+
+    if let Some((list_name, conf_name)) = hash.split_once('/') {
+        (list_name.to_string(), conf_name.to_string())
+    } else {
+        (hash.to_string(), String::new())
+    }
 }
 
-impl SelectedConf {
-    pub fn is_visible(&self) -> bool {
-        matches!(self, SelectedConf::Visible(_))
-    }
-
-    pub fn hide(&mut self) {
-        if let SelectedConf::Visible(name) = self {
-            *self = SelectedConf::Hidden(name.clone());
-        }
+fn route_hash(list_name: &str, conf_name: &str) -> String {
+    if conf_name.is_empty() {
+        list_name.to_string()
+    } else {
+        format!("{}/{}", list_name, conf_name)
     }
 }
 
 pub fn get_params_from_url() -> (String, String) {
-    if let Some(raw_hash) = web_sys::window().and_then(|w| w.location().hash().ok()).filter(|s| !s.is_empty()) {
-        // Убираем символ #
-        let raw_hash = &raw_hash[1..];
+    if let Some(raw_hash) = web_sys::window().and_then(|w| w.location().hash().ok()) {
+        let raw_hash = raw_hash.strip_prefix('#').unwrap_or(&raw_hash);
         if let Ok(js_string) = js_sys::decode_uri_component(raw_hash) {
             let hash: String = String::from(js_string);
-
-            return if let Some(dash_idx) = hash.find('/') {
-                let list_name = &hash[..dash_idx];
-                let conf_idx_str = &hash[dash_idx + 1..];
-                (list_name.to_string(), conf_idx_str.to_string())
-            } else {
-                (hash, String::new())
-            }
+            return parse_hash(&hash);
         }
     }
     (String::new(), String::new())
@@ -676,11 +662,45 @@ pub fn get_params_from_url() -> (String, String) {
 
 pub fn update_url(list_name: &str, conf_idx: &str) {
     if let Some(window) = web_sys::window() {
-        if let Ok(history) = window.history() {
-            let new_hash = format!("{}/{}", list_name, conf_idx);
-            if let Err(e) = history.push_state_with_url(&JsValue::null(), "", Some(&format!("#{}", new_hash))) {
+        let new_hash = route_hash(list_name, conf_idx);
+
+        let location = window.location();
+        let current_hash = location.hash().unwrap_or_default();
+        if current_hash.strip_prefix('#').unwrap_or(&current_hash) != new_hash.as_str() {
+            if let Err(e) = location.set_hash(&new_hash) {
                 log!("Failed to update URL: {:?}", e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_hash, route_hash};
+
+    #[test]
+    fn parses_empty_hash() {
+        assert_eq!(parse_hash(""), (String::new(), String::new()));
+        assert_eq!(parse_hash("#"), (String::new(), String::new()));
+    }
+
+    #[test]
+    fn parses_series_route() {
+        assert_eq!(parse_hash("#14"), ("14".to_string(), String::new()));
+        assert_eq!(parse_hash("#14/"), ("14".to_string(), String::new()));
+    }
+
+    #[test]
+    fn keeps_slashes_in_configuration_name() {
+        assert_eq!(
+            parse_hash("#14/14/14-example"),
+            ("14".to_string(), "14/14-example".to_string())
+        );
+    }
+
+    #[test]
+    fn formats_routes_without_a_trailing_slash() {
+        assert_eq!(route_hash("14", ""), "14");
+        assert_eq!(route_hash("14", "14/14-example"), "14/14/14-example");
     }
 }
