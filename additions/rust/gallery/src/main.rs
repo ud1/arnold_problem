@@ -4,7 +4,7 @@ mod ui;
 
 use crate::ui::{
     ArrangementDetails, ArrangementViewWithResource, CloseIcon, ConfigurationsSelector,
-    DownloadIcon, GalleryItem, InformationCircleIcon,
+    DownloadIcon, VirtualGallery, InformationCircleIcon,
 };
 use interaction::ConfigurationsSelectorState;
 use leptos::ev;
@@ -46,14 +46,12 @@ fn main() {
         let close_lightbox = move || {
             if !selected_conf.get().is_empty() {
                 selected_conf.set(String::new());
-                info_opened.set(false);
                 interaction::update_url(&selector_state.selected_list_name.get(), "");
             }
         };
 
         let open_lightbox = move |conf: String| {
             selected_conf.set(conf.clone());
-            info_opened.set(false);
             interaction::update_url(&selector_state.selected_list_name.get(), &conf);
         };
 
@@ -66,7 +64,6 @@ fn main() {
         let _ = window_event_listener(ev::hashchange, move |_| {
             let (list_name, conf_name) = interaction::get_params_from_url();
             selector_state.apply_route(list_name, conf_name);
-            info_opened.set(false);
         });
 
         let on_click_close = move |_ev| close_lightbox();
@@ -96,24 +93,7 @@ fn main() {
                 <GitHubLink/>
             </header>
 
-            <div class="gallery-wrapper">
-                <div class="gallery-container">
-                    <ForEnumerate
-                        each=move || selector_state.all_configurations()
-                        key=|conf_name| conf_name.clone()
-                        children={move |index: ReadSignal<usize>, conf_name: String| {
-                            let conf_name_clone = conf_name.clone();
-                            view! {
-                                <GalleryItem
-                                    num=index
-                                    count=selector_state.all_configurations().len()
-                                    on_click=move |_ev| open_lightbox(conf_name_clone.clone())
-                                    config_file=conf_name.clone() />
-                            }
-                        }}
-                    />
-                </div>
-            </div>
+            <VirtualGallery state=selector_state on_open=open_lightbox/>
 
             <div class="lightbox" class=("show", move || !selected_conf.get().is_empty())>
                 <Show when=move || !selected_conf.get().is_empty()>

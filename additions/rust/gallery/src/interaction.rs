@@ -494,10 +494,6 @@ impl ConfigurationsSelectorState {
         }
     }
 
-    pub fn all_configurations(&self) -> Vec<String> {
-        self.all_confs.get().unwrap_or_default()
-    }
-
     fn index_of(&self, id: &str) -> Option<usize> {
         self.filtered_series.get().iter().enumerate()
             .filter(|(_, item)| item.id == id)
@@ -538,8 +534,12 @@ impl ConfigurationsSelectorState {
     }
 
     pub fn apply_route(&self, list_name: String, conf_name: String) {
-        self.selected_list_name.set(list_name.clone());
-        self.selected_conf.set(conf_name);
+        if self.selected_list_name.get() != list_name {
+            self.selected_list_name.set(list_name.clone());
+        }
+        if self.selected_conf.get() != conf_name {
+            self.selected_conf.set(conf_name);
+        }
         self.filter.set(list_name.clone());
         self.active_list_name.set(list_name);
         self.is_dropdown_open.set(false);

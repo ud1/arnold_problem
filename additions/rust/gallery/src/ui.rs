@@ -1,7 +1,7 @@
 use leptos::{component, IntoView};
-use leptos::html::{Button};
+use leptos::html::{Button, Div};
 use leptos::prelude::*;
-use leptos_use::use_intersection_observer;
+use leptos_use::{use_element_size, use_intersection_observer, UseElementSizeReturn};
 use wasm_bindgen::JsCast;
 use web_sys::{MouseEvent, PointerEvent};
 use crate::geometry::{get_arnold_diff, solution_for_names, Arrangement};
@@ -48,6 +48,117 @@ pub fn ArrangementView(state: ArrangementState, arrangement: Arrangement, #[prop
         >
             {polygons_view}
         </svg>
+    }
+}
+
+const GALLERY_CHUNK_SIZE: usize = 360;
+
+#[component]
+pub fn VirtualGallery(
+    state: ConfigurationsSelectorState,
+    #[prop(into)] on_open: Callback<String>,
+) -> impl IntoView {
+    let container = NodeRef::<Div>::new();
+    let wrapper = NodeRef::<Div>::new();
+    let UseElementSizeReturn { width, .. } = use_element_size(container);
+    let layout = RwSignal::new((1usize, 250.0f64, 15.0f64));
+    let series = Memo::new(move |_| state.selected_list_name.get());
+    let count = Memo::new(move |_| {
+        state.all_confs.with(|value| value.as_ref().map_or(0, Vec::len))
+    });
+    let chunks = Memo::new(move |_| {
+        state.all_confs.with(|value| {
+            value.as_ref().map(|files| {
+                files.chunks(GALLERY_CHUNK_SIZE).enumerate()
+                    .map(|(index, files)| (index * GALLERY_CHUNK_SIZE, files.to_vec()))
+                    .collect::<Vec<_>>()
+            }).unwrap_or_default()
+        })
+    });
+
+    Effect::new(move |_| {
+        // Read the actual CSS grid tracks, including the mobile breakpoint.
+        // The observer's content width changes when a scrollbar appears too.
+        let _ = width.get();
+        if let Some(element) = container.get() {
+            if let Ok(Some(style)) = window().get_computed_style(&element) {
+                let tracks = style.get_property_value("grid-template-columns").unwrap_or_default();
+                let columns = tracks.split_whitespace().count().max(1);
+                let card_width = tracks.split_whitespace()
+                    .filter_map(|track| track.trim_end_matches("px").parse::<f64>().ok())
+                    .reduce(f64::max);
+                let gap = style.get_property_value("row-gap").ok()
+                    .and_then(|gap| gap.trim_end_matches("px").parse::<f64>().ok())
+                    .unwrap_or(15.0);
+                if let Some(card_width) = card_width.filter(|width| *width > 0.0) {
+                    layout.set((columns, card_width, gap));
+                }
+            }
+        }
+    });
+
+    Effect::new(move |_| {
+        let _ = series.get();
+        if let Some(element) = wrapper.get_untracked() {
+            element.set_scroll_top(0);
+        }
+    });
+
+    view! {
+        <div class="gallery-wrapper" node_ref=wrapper>
+            <div class="gallery-container" node_ref=container>
+                <For
+                    each=move || chunks.get()
+                    key=move |(start, files)| (*start, files.first().cloned())
+                    children=move |(start, files)| view! {
+                        <GalleryChunk files=files start=start count=count layout=layout on_open=on_open/>
+                    }
+                />
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn GalleryChunk(
+    files: Vec<String>,
+    start: usize,
+    #[prop(into)] count: Signal<usize>,
+    #[prop(into)] layout: Signal<(usize, f64, f64)>,
+    on_open: Callback<String>,
+) -> impl IntoView {
+    let node_ref = NodeRef::<Div>::new();
+    let visible = RwSignal::new(start == 0);
+    let length = files.len();
+    let files = StoredValue::new(files);
+    use_intersection_observer(node_ref, move |entries, _| {
+        if let Some(entry) = entries.first() {
+            visible.set(entry.is_intersecting());
+        }
+    });
+
+    view! {
+        <div class="gallery-chunk" node_ref=node_ref
+            style=move || {
+                let (columns, card_width, gap) = layout.get();
+                let rows = length.div_ceil(columns);
+                let height = rows as f64 * card_width + rows.saturating_sub(1) as f64 * gap;
+                format!("height:{height}px")
+            }
+        >
+            <Show when=move || visible.get()>
+                {move || files.with_value(|files| {
+                    files.iter().enumerate().map(|(offset, file)| {
+                        let file = file.clone();
+                        let file_for_click = file.clone();
+                        view! {
+                            <GalleryItem num=start + offset count=count config_file=file
+                                on_click=move |_| on_open.run(file_for_click.clone())/>
+                        }
+                    }).collect_view()
+                })}
+            </Show>
+        </div>
     }
 }
 
