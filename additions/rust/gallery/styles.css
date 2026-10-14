@@ -885,3 +885,13 @@ polygon.s4.ext.b {
 polygon.s4.w {
     fill: #ffffdd;
 }
+
+/* Empty chunks retain the exact grid height while their cards are unmounted. */
+.gallery-chunk {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    gap: inherit;
+    align-content: start;
+    overflow-anchor: none;
+}
