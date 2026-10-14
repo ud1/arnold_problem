@@ -70,6 +70,8 @@ footer {
     align-items: center;
     gap: 10px;
     min-width: 0;
+    text-decoration: none;
+    color: inherit;
 }
 
 .brand-mark {
@@ -894,4 +896,137 @@ polygon.s4.w {
     gap: inherit;
     align-content: start;
     overflow-anchor: none;
+}
+
+.loading-background {
+    fill: #effefc;
+}
+
+.loading-bar {
+    stroke-color: #68747a;
+}
+
+@keyframes wave {
+    0%, 100% {
+        fill: #c4dae6;
+    }
+    50% {
+        fill: #68747a;
+    }
+}
+
+.loading-bar-segment {
+    fill: #68747a;
+    animation: wave 1.5s ease-in-out infinite;
+}
+
+.loading-bar-segment:nth-child(1)  { animation-delay: 0s; }
+.loading-bar-segment:nth-child(2)  { animation-delay: 0.1s; }
+.loading-bar-segment:nth-child(3)  { animation-delay: 0.2s; }
+.loading-bar-segment:nth-child(4)  { animation-delay: 0.3s; }
+.loading-bar-segment:nth-child(5)  { animation-delay: 0.4s; }
+.loading-bar-segment:nth-child(6)  { animation-delay: 0.5s; }
+.loading-bar-segment:nth-child(7)  { animation-delay: 0.6s; }
+.loading-bar-segment:nth-child(8)  { animation-delay: 0.7s; }
+.loading-bar-segment:nth-child(9)  { animation-delay: 0.8s; }
+.loading-bar-segment:nth-child(10) { animation-delay: 0.9s; }
+
+
+
+
+.ka-intro-wrapper {
+    display: flex;
+    justify-content: center;
+    padding: 40px 20px;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.ka-intro-card {
+    background: #ffffff;
+    padding: 40px;
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05); /* Soft shadow */
+    border: 1px solid #e2e8f0;
+    text-align: center;
+    animation: kaFadeIn 0.8s ease-out;
+}
+
+.ka-title {
+    font-size: 2rem;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 10px;
+    letter-spacing: -0.5px;
+}
+
+.ka-subtitle {
+    font-size: 1.1rem;
+    color: #64748b; /* Matches your header color */
+    margin-bottom: 40px;
+    font-weight: 400;
+}
+
+/* Grid for the two problems */
+.ka-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    text-align: left;
+}
+
+@media (max-width: 768px) {
+    .ka-grid {
+        grid-template-columns: 1fr;
+        gap: 30px;
+    }
+}
+
+/* Problem specific styles */
+.ka-problem {
+    background: #f8fafc;
+    padding: 25px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ka-problem:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+}
+
+.ka-problem h3 {
+    margin-top: 0;
+    font-size: 1.4rem;
+    color: #475569;
+    border-bottom: 2px solid #cbd5e1;
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+}
+
+.ka-problem p {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: #475569;
+    margin-bottom: 15px;
+}
+
+.ka-math {
+    display: block;
+    background: #ffffff;
+    padding: 8px;
+    margin: 10px 0;
+    border-radius: 6px;
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: bold;
+    color: #334155;
+    text-align: center;
+    border: 1px solid #e2e8f0;
+}
+
+/* Animation keyframes */
+@keyframes kaFadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }

@@ -295,11 +295,11 @@ pub fn download_arrangement(arrangement: &Arrangement) {
     }
     result.push_str("-->\n");
     result.push_str("  <style>
-    .int.b {fill: #888888;}
+    .int.b {fill: #eaa2a0;}
     .ext.b {fill: #eeeeee;}
-    .w {fill: #ffffff;}
-    .s3.int.b {fill: #000000;}
-    .s3.int.w {fill: #222222;}
+    .w {fill: #effefc;}
+    .s3.int.b {fill: #3d635f;}
+    .s3.int.w {fill: #6e312f;}
     .s3.ext.b {fill: #cccccc;}
     .s3.ext.w {fill: #dddddd;}
     .s4.int.b {fill: #888844;}
@@ -353,6 +353,12 @@ fn get_file_name(conf_file: &String) -> String {
 }
 
 static CACHE: OnceLock<Mutex<HashMap<String, Arrangement>>> = OnceLock::new();
+
+pub fn already_fetched(conf_file: String) -> bool {
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let lock = cache.lock().unwrap();
+    lock.get(&conf_file).is_some()
+}
 
 pub async fn fetch_arrangement_config(conf_file: String) -> Option<Arrangement> {
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -492,6 +498,10 @@ impl ConfigurationsSelectorState {
             index,
             input_ref,
         }
+    }
+
+    pub fn move_to_main_page(&self) {
+        self.apply_route(String::new(), String::new());
     }
 
     fn index_of(&self, id: &str) -> Option<usize> {

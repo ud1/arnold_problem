@@ -1,12 +1,12 @@
 use leptos::{component, IntoView};
 use leptos::html::{Button, Div};
 use leptos::prelude::*;
-use leptos_use::{use_element_size, use_intersection_observer, UseElementSizeReturn};
+use leptos_use::{use_debounce_fn, use_element_size, use_intersection_observer, UseElementSizeReturn};
 use wasm_bindgen::JsCast;
 use web_sys::{MouseEvent, PointerEvent};
 use crate::geometry::{get_arnold_diff, solution_for_names, Arrangement};
 use crate::interaction;
-use crate::interaction::{ArrangementState, ConfigurationsSelectorState};
+use crate::interaction::{already_fetched, ArrangementState, ConfigurationsSelectorState};
 
 #[component]
 pub fn ArrangementView(state: ArrangementState, arrangement: Arrangement, #[prop(into)] active: Signal<bool>) -> impl IntoView {
@@ -51,7 +51,43 @@ pub fn ArrangementView(state: ArrangementState, arrangement: Arrangement, #[prop
     }
 }
 
-const GALLERY_CHUNK_SIZE: usize = 360;
+#[component]
+pub fn StartPage() -> impl IntoView {
+    view! {
+        <div class="ka-intro-wrapper">
+            <div class="ka-intro-card">
+                <h1 class="ka-title">"Kobon & Arnold"</h1>
+                <p class="ka-subtitle">"Exploring the combinatorics of lines on the affine plane"</p>
+
+                <div class="ka-grid">
+                    <div class="ka-problem">
+                        <h3>{"Kobon Triangle Problem"}</h3>
+                        <p>
+                            "Formulated by Kobon Fujimura in 1983, this problem asks for the maximum number "<strong>"N(k)"</strong>" of non-overlapping triangles whose sides lie on an arrangement of "<strong>"k"</strong>" lines."
+                        </p>
+                        <span class="ka-math">"Maximize: N(k)"</span>
+                        <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 0;">
+                            "The triangles must not be crossed by any other lines of the arrangement."
+                        </p>
+                    </div>
+
+                    <div class="ka-problem">
+                        <h3>{"Arnold's Problem"}</h3>
+                        <p>
+                            "A related question concerning the "<strong>"checkerboard coloring"</strong>" of the faces formed by the arrangement."
+                        </p>
+                        <span class="ka-math">"Maximize: |B - W|"</span>
+                        <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 0;">
+                            "What is the greatest difference between the number of black (B) and white (W) regions?"
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+const GALLERY_CHUNK_SIZE: usize = 120;
 
 #[component]
 pub fn VirtualGallery(
@@ -106,15 +142,19 @@ pub fn VirtualGallery(
 
     view! {
         <div class="gallery-wrapper" node_ref=wrapper>
-            <div class="gallery-container" node_ref=container>
-                <For
-                    each=move || chunks.get()
-                    key=move |(start, files)| (*start, files.first().cloned())
-                    children=move |(start, files)| view! {
-                        <GalleryChunk files=files start=start count=count layout=layout on_open=on_open/>
-                    }
-                />
-            </div>
+            <Show when=move || !series.get().is_empty() fallback=move || view! {<StartPage/>}>
+                <div class="gallery-container" node_ref=container>
+                    <For
+                        each=move || chunks.get()
+                        key=move |(start, files)| (*start, files.first().cloned())
+                        children=move |(start, files)| view! {
+                            <GalleryChunk files=files start=start count=count layout=layout on_open=on_open/>
+                        }
+                    />
+
+
+                </div>
+            </Show>
         </div>
     }
 }
@@ -170,12 +210,28 @@ pub fn GalleryItem(
     #[prop(into)] count: Signal<usize>,
 ) -> impl IntoView {
     let node_ref = NodeRef::<Button>::new();
-    let (is_visible, set_visible) = signal(false);
+    let (is_visible_immediate, set_visible_immediate) = signal(false);
+    let (is_visible_raw, set_visible_raw) = signal(false);
+
+    let set_visible_debounced = use_debounce_fn(
+        move || {
+            if is_visible_immediate.get_untracked() {
+                set_visible_raw.set(true)
+            }
+        },
+        30.0,
+    );
 
     use_intersection_observer(
         node_ref,
         move |entries, _| {
-            set_visible.set(entries[0].is_intersecting());
+            let intersecting = entries.last().unwrap().is_intersecting();
+            set_visible_immediate.set(intersecting);
+            if intersecting {
+                set_visible_debounced();
+            } else {
+                set_visible_raw.set(false);
+            }
         },
     );
 
@@ -184,7 +240,8 @@ pub fn GalleryItem(
                 node_ref=node_ref
                 on:click=move |e| on_click.run(e)>
             <Show
-                when=move || is_visible.get()
+                when=move || is_visible_raw.get() || is_visible_immediate.get() && already_fetched(config_file.get())
+                fallback=move || if is_visible_immediate.get() {Some(view! {<ImageLoading/>})} else {None}
             >
                 <ArrangementViewWithLoad
                     config_file=config_file
@@ -219,6 +276,29 @@ pub fn ArrangementViewWithLoad(
         />
     }
 }
+#[component]
+pub fn ImageLoading() -> impl IntoView {
+    view! {
+        <svg viewBox="0 0 400 400" width="400" height="400" class="arrangement" preserveAspectRatio="xMidYMid slice">
+            <g>
+                <rect x="0" y="0" width="400" height="400" class="loading-background" />
+                <rect x="40" y="180" width="320" height="40" rx="4" ry="4" fill="none" stroke="#3a4a4a" stroke-width="2" class="loading-bar"/>
+                <g>
+                    <rect x="52" y="188" width="16" height="24" class="loading-bar-segment"/>
+                    <rect x="74" y="188" width="16" height="24" class="loading-bar-segment"/>
+                    <rect x="96" y="188" width="16" height="24" class="loading-bar-segment"/>
+                    <rect x="118" y="188" width="16" height="24" class="loading-bar-segment"/>
+                    <rect x="140" y="188" width="16" height="24" class="loading-bar-segment"/>
+                    <rect x="162" y="188" width="16" height="24" class="loading-bar-segment"/>
+                    <rect x="184" y="188" width="16" height="24" class="loading-bar-segment"/>
+                    <rect x="206" y="188" width="16" height="24" class="loading-bar-segment"/>
+                    <rect x="228" y="188" width="16" height="24" class="loading-bar-segment"/>
+                    <rect x="250" y="188" width="16" height="24" class="loading-bar-segment"/>
+                </g>
+            </g>
+        </svg>
+    }
+}
 
 #[component]
 pub fn ArrangementViewWithResource(
@@ -226,7 +306,7 @@ pub fn ArrangementViewWithResource(
     #[prop(into)] active: Signal<bool>,
 ) -> impl IntoView {
     view! {
-        <Transition fallback=move || view! {}>
+        <Transition fallback=move || view! {<ImageLoading/>}>
             {move || {
                 arrangement_resource.with(|maybe_res| {
                     maybe_res

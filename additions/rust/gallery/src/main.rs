@@ -12,15 +12,18 @@ use leptos::prelude::*;
 use web_sys::KeyboardEvent;
 
 #[component]
-fn Brand() -> impl IntoView {
+fn Brand(state: ConfigurationsSelectorState) -> impl IntoView {
     view! {
-        <div class="brand" aria-label="Kobon and Arnold gallery">
+        <a on:click=move |e| {
+            state.move_to_main_page();
+            e.prevent_default();
+        } class="brand" aria-label="Kobon and Arnold gallery" href="#">
             <span class="brand-mark" aria-hidden="true">{"K+A"}</span>
             <span class="brand-copy">
                 <strong>{"Solution gallery"}</strong>
                 <small>{"Kobon & Arnold"}</small>
             </span>
-        </div>
+        </a>
     }
 }
 
@@ -88,7 +91,7 @@ fn main() {
 
         view! {
             <header>
-                <Brand/>
+                <Brand state=selector_state.clone()/>
                 <ConfigurationsSelector state=selector_state.clone() />
                 <GitHubLink/>
             </header>
