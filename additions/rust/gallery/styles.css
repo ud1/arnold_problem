@@ -223,6 +223,15 @@ footer {
     height: 100vh;
 }
 
+.lightbox canvas.arrangement {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    display: block;
+}
+
 @keyframes zoomIn {
     from {transform:scale(0.8)}
     to {transform:scale(1)}
@@ -888,7 +897,6 @@ polygon.s4.w {
     fill: #ffffdd;
 }
 
-/* Empty chunks retain the exact grid height while their cards are unmounted. */
 .gallery-chunk {
     grid-column: 1 / -1;
     display: grid;
@@ -933,7 +941,6 @@ polygon.s4.w {
 
 
 
-
 .ka-intro-wrapper {
     display: flex;
     justify-content: center;
@@ -946,7 +953,7 @@ polygon.s4.w {
     background: #ffffff;
     padding: 40px;
     border-radius: 16px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05); /* Soft shadow */
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05);
     border: 1px solid #e2e8f0;
     text-align: center;
     animation: kaFadeIn 0.8s ease-out;
@@ -962,12 +969,11 @@ polygon.s4.w {
 
 .ka-subtitle {
     font-size: 1.1rem;
-    color: #64748b; /* Matches your header color */
+    color: #64748b;
     margin-bottom: 40px;
     font-weight: 400;
 }
 
-/* Grid for the two problems */
 .ka-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -982,7 +988,6 @@ polygon.s4.w {
     }
 }
 
-/* Problem specific styles */
 .ka-problem {
     background: #f8fafc;
     padding: 25px;
@@ -1025,7 +1030,6 @@ polygon.s4.w {
     border: 1px solid #e2e8f0;
 }
 
-/* Animation keyframes */
 @keyframes kaFadeIn {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }

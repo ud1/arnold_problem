@@ -69,7 +69,7 @@ fn touch_distance(t1: &web_sys::Touch, t2: &web_sys::Touch) -> f64 {
     (dx * dx + dy * dy).sqrt()
 }
 
-fn touch_center(t1: &web_sys::Touch, t2: &web_sys::Touch, target: &web_sys::SvgElement) -> Point {
+fn touch_center(t1: &web_sys::Touch, t2: &web_sys::Touch, target: &web_sys::Element) -> Point {
     let rect = target.get_bounding_client_rect();
     let cx = (t1.client_x() + t2.client_x()) as f64 / 2.0;
     let cy = (t1.client_y() + t2.client_y()) as f64 / 2.0;
@@ -79,8 +79,8 @@ fn touch_center(t1: &web_sys::Touch, t2: &web_sys::Touch, target: &web_sys::SvgE
 fn get_rect(current_target: Option<EventTarget>) -> DomRect {
     current_target
         .expect("Event has no current_target")
-        .dyn_into::<web_sys::SvgElement>()
-        .expect("Current target is not an SvgElement")
+        .dyn_into::<web_sys::Element>()
+        .expect("Current target is not an Element")
         .get_bounding_client_rect()
 }
 
@@ -111,6 +111,9 @@ fn get_rel_pos(rect: DomRect, pos: Point) -> Point {
     Point { x, y }
 }
 
+const MIN_SCALE: f64 = 0.1;
+const MAX_SCALE: f64 = 1.0e12;
+
 impl ArrangementState {
     pub fn on_wheel(&self, ev: WheelEvent) {
         ev.prevent_default();
@@ -121,7 +124,7 @@ impl ArrangementState {
         let current_shift = self.shift.get();
 
         let factor = if ev.delta_y() < 0.0 { 1.1 } else { 1.0 / 1.1 };
-        let new_scale = (current_scale * factor).clamp(0.1, 1000000.0);
+        let new_scale = (current_scale * factor).clamp(MIN_SCALE, MAX_SCALE);
 
         let d = mouse - current_shift;
 
@@ -200,7 +203,7 @@ impl ArrangementState {
 
         let target = ev.current_target()
             .unwrap()
-            .dyn_into::<web_sys::SvgElement>()
+            .dyn_into::<web_sys::Element>()
             .unwrap();
 
         let current_distance = touch_distance(&t0, &t1);
@@ -208,7 +211,7 @@ impl ArrangementState {
 
         // Вычисляем коэффициент зума
         let zoom_factor = current_distance / pinch.initial_distance;
-        let new_scale = (pinch.initial_scale * zoom_factor).clamp(0.1, 100.0);
+        let new_scale = (pinch.initial_scale * zoom_factor).clamp(MIN_SCALE, MAX_SCALE);
 
         // Применяем зум относительно центральной точки между пальцами
         let d = center - self.shift.get();
@@ -294,22 +297,8 @@ pub fn download_arrangement(arrangement: &Arrangement) {
         result.push_str(&format!("{},{}\n", mb[0], mb[1]));
     }
     result.push_str("-->\n");
-    result.push_str("  <style>
-    .int.b {fill: #eaa2a0;}
-    .ext.b {fill: #eeeeee;}
-    .w {fill: #effefc;}
-    .s3.int.b {fill: #3d635f;}
-    .s3.int.w {fill: #6e312f;}
-    .s3.ext.b {fill: #cccccc;}
-    .s3.ext.w {fill: #dddddd;}
-    .s4.int.b {fill: #888844;}
-    .s4.ext.b {fill: #eeeecc;}
-    .s4.w {fill: #ffffdd;}
-  </style>
-  ");
-
     for p in arrangement.polygons.iter() {
-        result.push_str(&format!("  <polygon class=\"{} {} s{}\" points=\"", if p.b {"b"} else {"w"}, if p.ext {"ext"} else {"int"}, p.sz));
+        result.push_str(&format!("  <polygon fill=\"{}\" points=\"", crate::canvas::polygon_fill(p.b, p.ext, p.sz)));
         for (i, pt) in p.points.iter().enumerate() {
             if i > 0 {
                 result.push_str(" ");

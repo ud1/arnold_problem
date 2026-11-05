@@ -1,3 +1,4 @@
+mod canvas;
 mod geometry;
 mod interaction;
 mod ui;
@@ -35,6 +36,17 @@ fn GitHubLink() -> impl IntoView {
                 <img src="images/github_logo.svg" alt="GitHub"/>
             </a>
         </div>
+    }
+}
+
+fn format_copyright_year() -> String {
+    let start_year = 2026;
+    let current_year = js_sys::Date::new_0().get_full_year() as i32;
+
+    if current_year > start_year {
+        format!("{} – {}", start_year, current_year)
+    } else {
+        start_year.to_string()
     }
 }
 
@@ -117,7 +129,7 @@ fn main() {
             </div>
 
             <footer class="center-container">
-                <span>{"Solutions to the Kobon and Arnold problems. Denis Utkin and Roman Parpalak, 2026"}</span>
+                <span>{format!("Solutions to the Kobon and Arnold problems. Denis Utkin and Roman Parpalak, {}", format_copyright_year())}</span>
             </footer>
         }
     })

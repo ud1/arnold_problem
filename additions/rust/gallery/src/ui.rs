@@ -1,53 +1,132 @@
-use leptos::{component, IntoView};
-use leptos::html::{Button, Div};
+use std::cell::Cell;
+use std::rc::Rc;
+
+use leptos::{component, either::Either, IntoView};
+use leptos::html::{Button, Canvas, Div};
 use leptos::prelude::*;
 use leptos_use::{use_debounce_fn, use_element_size, use_intersection_observer, UseElementSizeReturn};
 use wasm_bindgen::JsCast;
 use web_sys::{MouseEvent, PointerEvent};
-use crate::geometry::{get_arnold_diff, solution_for_names, Arrangement};
+use crate::canvas;
+use crate::geometry::{self, get_arnold_diff, solution_for_names, Arrangement};
 use crate::interaction;
 use crate::interaction::{already_fetched, ArrangementState, ConfigurationsSelectorState};
 
+// Минимальный видимый размер полигона в пикселях экрана.
+const MIN_POLYGON_PX: f64 = 0.1;
+// Минимальный размер карточки галереи из CSS grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)).
+const GALLERY_CARD_PX: f64 = 250.0;
+
+// Статичная SVG-версия для грида миниатюр: без зума, сдвига и обработчиков событий.
 #[component]
-pub fn ArrangementView(state: ArrangementState, arrangement: Arrangement, #[prop(into)] active: Signal<bool>) -> impl IntoView {
-    let polygons_view = arrangement.polygons.iter().map(|polygon| {
-        let pts = polygon.points.clone();
+pub fn ArrangementView(arrangement: Arrangement) -> impl IntoView {
+    // Микроскопические полигоны (меньше MIN_POLYGON_PX пикселей по всем сторонам
+    // при размере карточки GALLERY_CARD_PX) не рисуем: их видно только при гигантском зуме.
+    let side = arrangement.w.max(arrangement.h);
+    let skip_below = MIN_POLYGON_PX * side / GALLERY_CARD_PX;
 
-        view! {
-            <polygon
-                points=move || {
-                    let s = state.scale.get();
-                    let shift_x = state.shift.get().x * arrangement.w;
-                    let shift_y = state.shift.get().y * arrangement.h;
-
-                    pts.iter()
-                        .map(|&pt| format!("{},{}", pt.x * s + shift_x , -pt.y * s + shift_y))
-                        .collect::<Vec<String>>()
-                        .join(" ")
+    let polygons_view = arrangement.polygons.iter()
+        .filter(|polygon| {
+            let (min_x, max_x, min_y, max_y) = geometry::polygon_bbox(&polygon.points);
+            max_x - min_x >= skip_below || max_y - min_y >= skip_below
+        })
+        .map(|polygon| {
+            let mut pts = String::with_capacity(polygon.points.len() * 24);
+            for (i, pt) in polygon.points.iter().enumerate() {
+                if i > 0 {
+                    pts.push(' ');
                 }
-                class=format!("{} {} s{}", if polygon.b {"b"} else {"w"}, if polygon.ext {"ext"} else {"int"}, polygon.sz)
-            />
-        }
-    }).collect_view();
+                pts.push_str(&format!("{},{}", pt.x, -pt.y));
+            }
+
+            view! {
+                <polygon
+                    points=pts
+                    class=format!("{} {} s{}", if polygon.b {"b"} else {"w"}, if polygon.ext {"ext"} else {"int"}, polygon.sz)
+                />
+            }
+        })
+        .collect_view();
 
     view! {
         <svg class="arrangement"
             viewBox=format!("{} {} {} {}", -arrangement.w*0.5, -arrangement.h*0.5, arrangement.w, arrangement.h)
-            style="touch-action: none; overscroll-behavior: none;"
             preserveAspectRatio="xMidYMid slice"
-
-            on:wheel=move |ev| { if active.get() { state.on_wheel(ev); } }
-            on:pointerdown=move |ev| { if active.get() { state.on_pointer_down(ev); } }
-            on:pointermove=move |ev| { if active.get() { state.on_pointer_move(ev); } }
-            on:pointerup=move |ev| { if active.get() { state.on_pointer_up(ev); } }
-
-            on:touchstart=move |ev| { if active.get() { state.on_touch_start(ev); } }
-            on:touchmove=move |ev| { if active.get() { state.on_touch_move(ev); } }
-            on:touchend=move |ev| { if active.get() { state.on_touch_end(ev); } }
-            on:touchcancel=move |ev| { if active.get() { state.on_touch_end(ev); } }
         >
             {polygons_view}
         </svg>
+    }
+}
+
+#[component]
+pub fn ArrangementCanvasView(state: ArrangementState, arrangement: Arrangement) -> impl IntoView {
+    let canvas_ref = NodeRef::<Canvas>::new();
+    let target = StoredValue::new(canvas::build_target(&arrangement));
+    let UseElementSizeReturn { width, height } = use_element_size(canvas_ref);
+    let scheduled = Rc::new(Cell::new(false));
+
+    let draw = {
+        let scheduled = scheduled.clone();
+        move || {
+            scheduled.set(false);
+
+            let Some(canvas_el) = canvas_ref.get() else { return };
+            let css_w = canvas_el.client_width();
+            let css_h = canvas_el.client_height();
+            if css_w <= 0 || css_h <= 0 {
+                return;
+            }
+
+            let dpr = window().device_pixel_ratio();
+            let dev_w = (css_w as f64 * dpr).max(1.0);
+            let dev_h = (css_h as f64 * dpr).max(1.0);
+
+            let backing_w = dev_w.round() as u32;
+            let backing_h = dev_h.round() as u32;
+            if canvas_el.width() != backing_w {
+                canvas_el.set_width(backing_w);
+            }
+            if canvas_el.height() != backing_h {
+                canvas_el.set_height(backing_h);
+            }
+
+            let Ok(Some(context)) = canvas_el.get_context("2d") else { return };
+            let Ok(ctx) = context.dyn_into::<web_sys::CanvasRenderingContext2d>() else { return };
+
+            target.with_value(|target| {
+                canvas::paint(&ctx, target, dev_w, dev_h, state.scale.get_untracked(), state.shift.get_untracked());
+            });
+        }
+    };
+
+    Effect::new(move |_| {
+        let _ = width.get();
+        let _ = height.get();
+        let _ = state.scale.get();
+        let _ = state.shift.get();
+
+        if !scheduled.get() {
+            scheduled.set(true);
+            let draw = draw.clone();
+            request_animation_frame(move || draw());
+        }
+    });
+
+    view! {
+        <canvas class="arrangement"
+            node_ref=canvas_ref
+            style="touch-action: none; overscroll-behavior: none;"
+
+            on:wheel=move |ev| { state.on_wheel(ev); }
+            on:pointerdown=move |ev| { state.on_pointer_down(ev); }
+            on:pointermove=move |ev| { state.on_pointer_move(ev); }
+            on:pointerup=move |ev| { state.on_pointer_up(ev); }
+
+            on:touchstart=move |ev| { state.on_touch_start(ev); }
+            on:touchmove=move |ev| { state.on_touch_move(ev); }
+            on:touchend=move |ev| { state.on_touch_end(ev); }
+            on:touchcancel=move |ev| { state.on_touch_end(ev); }
+        ></canvas>
     }
 }
 
@@ -56,16 +135,16 @@ pub fn StartPage() -> impl IntoView {
     view! {
         <div class="ka-intro-wrapper">
             <div class="ka-intro-card">
-                <h1 class="ka-title">"Kobon & Arnold"</h1>
+                <h1 class="ka-title">"Kobon & Arnold solutions"</h1>
                 <p class="ka-subtitle">"Exploring the combinatorics of lines on the affine plane"</p>
 
                 <div class="ka-grid">
                     <div class="ka-problem">
                         <h3>{"Kobon Triangle Problem"}</h3>
                         <p>
-                            "Formulated by Kobon Fujimura in 1983, this problem asks for the maximum number "<strong>"N(k)"</strong>" of non-overlapping triangles whose sides lie on an arrangement of "<strong>"k"</strong>" lines."
+                            "Formulated by Kobon Fujimura in 1983, this problem asks for the maximum number "<strong>"K(n)"</strong>" of non-overlapping triangles whose sides lie on an arrangement of "<strong>"n"</strong>" lines."
                         </p>
-                        <span class="ka-math">"Maximize: N(k)"</span>
+                        <span class="ka-math">"Maximize: K(n)"</span>
                         <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 0;">
                             "The triangles must not be crossed by any other lines of the arrangement."
                         </p>
@@ -151,8 +230,6 @@ pub fn VirtualGallery(
                             <GalleryChunk files=files start=start count=count layout=layout on_open=on_open/>
                         }
                     />
-
-
                 </div>
             </Show>
         </div>
@@ -313,10 +390,13 @@ pub fn ArrangementViewWithResource(
                         .as_ref()
                         .and_then(|opt| opt.as_ref())
                         .map(|conf| {
-                            let state = ArrangementState::default();
-
-                            view! {
-                                <ArrangementView state=state arrangement=conf.clone() active=active/>
+                            // active не меняется в течение жизни компонента: галерейные миниатюры
+                            // создаются с active=false, вьювер в лайтбоксе — с active=true.
+                            if active.get_untracked() {
+                                let state = ArrangementState::default();
+                                Either::Left(view! { <ArrangementCanvasView state=state arrangement=conf.clone()/> })
+                            } else {
+                                Either::Right(view! { <ArrangementView arrangement=conf.clone()/> })
                             }
                         })
                 })

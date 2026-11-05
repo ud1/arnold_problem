@@ -231,6 +231,23 @@ struct LineClipCrossPoint {
     pub edge: i32,
 }
 
+// (min_x, max_x, min_y, max_y)
+pub fn polygon_bbox(points: &[Point]) -> (f64, f64, f64, f64) {
+    let mut min_x = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut min_y = f64::MAX;
+    let mut max_y = f64::MIN;
+
+    for pt in points {
+        min_x = min_x.min(pt.x);
+        max_x = max_x.max(pt.x);
+        min_y = min_y.min(pt.y);
+        max_y = max_y.max(pt.y);
+    }
+
+    (min_x, max_x, min_y, max_y)
+}
+
 pub fn get_arnold_diff(arrangement: &Arrangement) -> i32 {
     let b_count = arrangement.polygons.iter()
         .filter(|p| p.b).count();
@@ -554,5 +571,53 @@ pub fn solution_for_names(arrangement: &Arrangement) -> &str {
     }
     else {
         "Unknown"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Статистика отсечения микроскопических полигонов на реальной большой конфигурации.
+    #[test]
+    fn gallery_skip_statistics() {
+        let raw = std::fs::read_to_string("data/161/161-2mqss9dfefbqt.json").expect("config file");
+        let conf: ArrangementConf = serde_json::from_str(&raw).expect("parse conf");
+        let arrangement = generate_arrangement(&conf, "161-test".to_string());
+
+        assert_eq!(arrangement.polygons.len(), 13042);
+        assert_eq!(arrangement.w, 1440.0);
+        assert_eq!(arrangement.h, 1440.0);
+
+        let side = arrangement.w.max(arrangement.h);
+        let skip_below = 0.1 * side / 250.0;
+        let kept = arrangement.polygons.iter()
+            .filter(|p| {
+                let (min_x, max_x, min_y, max_y) = polygon_bbox(&p.points);
+                max_x - min_x >= skip_below || max_y - min_y >= skip_below
+            })
+            .count();
+        // Проверялось сравнением с рендером в браузере: остаётся только видимое.
+        assert_eq!(kept, 430);
+    }
+
+    // Палитра канваса должна совпадать с CSS-каскадом polygon.* в styles.css.
+    #[test]
+    fn polygon_fill_matches_css() {
+        // s3: .s3.int.b > .int.b, .s3.int.w > .w, .s3.ext.b > .ext.b, .s3.ext.w > .w
+        assert_eq!(crate::canvas::polygon_fill(true, false, 3), "#3d635f");
+        assert_eq!(crate::canvas::polygon_fill(false, false, 3), "#6e312f");
+        assert_eq!(crate::canvas::polygon_fill(true, true, 3), "#cccccc");
+        assert_eq!(crate::canvas::polygon_fill(false, true, 3), "#dddddd");
+        // s4: .s4.int.b, .s4.ext.b, .s4.w > .w
+        assert_eq!(crate::canvas::polygon_fill(true, false, 4), "#888844");
+        assert_eq!(crate::canvas::polygon_fill(true, true, 4), "#eeeecc");
+        assert_eq!(crate::canvas::polygon_fill(false, false, 4), "#ffffdd");
+        assert_eq!(crate::canvas::polygon_fill(false, true, 4), "#ffffdd");
+        // sz >= 5: .int.b, .ext.b, .w
+        assert_eq!(crate::canvas::polygon_fill(true, false, 5), "#eaa2a0");
+        assert_eq!(crate::canvas::polygon_fill(true, true, 5), "#eeeeee");
+        assert_eq!(crate::canvas::polygon_fill(false, false, 5), "#effefc");
+        assert_eq!(crate::canvas::polygon_fill(false, true, 9), "#effefc");
     }
 }
